@@ -1,0 +1,13 @@
+[package]
+name = "kernel"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sel4 = { git = "https://github.com/seL4/rust-sel4" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
