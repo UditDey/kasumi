@@ -1,8 +1,3 @@
-# We set min-pagesize=0 to indicate that the minimum accessible address is 0
-# This makes newer versions of GCC shut up about dereferencing pointers to low addresses
-# See: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=105523
-CUSTOM_C_FLAGS=""
-
 echo Building seL4...
 
 if [ ! -d build ]; then
