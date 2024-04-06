@@ -4,7 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-sel4 = { git = "https://github.com/seL4/rust-sel4" }
+limine = "0.2.0"
+x86_64 = "0.15.1"
+spinning_top = "0.3.0"
+
+[build-dependencies]
+fontdue = "0.8.0"
 
 [profile.dev]
 panic = "abort"

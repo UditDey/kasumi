@@ -1,11 +1,12 @@
 # Kasumi
 
-Kasumi is an `x86_64` PC operating system design built with [seL4](https://github.com/seL4/seL4/tree/master), Rust and [limine](https://github.com/limine-bootloader/limine/tree/trunk)
+Kasumi is an experimental `x86_64` PC operating system design written in Rust
 
-This project is an experiment in OS userspace design with the broad goals being:
-- Can we build a graphical desktop grade OS atop the `seL4` microkernel?
-- Can we create a userspace consisting of components communicating over a system-wide bus with well defined [flatbuffer](https://flatbuffers.dev/) schemas?
-- Can we create a userspace with a common config file format with well defined schemas?
+The project's broad design goals are:
+- Uses the [limine](https://github.com/limine-bootloader/limine/tree/trunk) bootloader
+- Microkernel with L4 inspired capabilities and IPC system
+- Userspace designed around a system-wide bus with well defined schemas
+- Common config file language with well defined schemas
 
 ### Build Instructions
 
@@ -17,5 +18,3 @@ make run
 # Delete everything we built :D
 make clean
 ```
-
-Have fun collecting all the dependencies!

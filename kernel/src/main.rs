@@ -1,47 +1,72 @@
 #![no_std]
 #![no_main]
 
-use core::arch::global_asm;
+#![feature(panic_info_message)]
+
+mod debug;
+
 use core::panic::PanicInfo;
 
-use sel4::BootInfo;
+use limine::{
+    BaseRevision,
+    request::{FramebufferRequest, StackSizeRequest, MemoryMapRequest}
+};
 
-// Kernel/root task entry point:
-// seL4 loads us and calls _start, passing the `BootInfo` struct
-// Standard x86_64 calling convention is used, so the BootInfo pointer is in `rdi`
-// 
-// The root task has no stack, so we'll set that up and immediately jump to kmain
-// 
-// References for the entire startup procedure:
-// 1) https://github.com/seL4/rust-sel4/blob/main/crates/sel4-root-task
-// 2) https://github.com/seL4/rust-sel4/blob/main/crates/sel4-runtime-common
-// 3) https://gitlab.com/robigalia/sel4-start
-global_asm! {
-    r#"
-        .global _start
-        .equ stack_size, 1024 * 64 // 64 KiB stack
+const KERNEL_STACK_SIZE: u64 = 128 * 1024; // 128 KiB
 
-        .section .bss
-        .lcomm kernel_stack_top, stack_size
-        kernel_stack_bottom:
+// Limine bootloader requests
+#[used] pub static BASE_REVISION: BaseRevision = BaseRevision::new();
+#[used] pub static FRAMEBUFFER_REQUEST: FramebufferRequest = FramebufferRequest::new();
+#[used] pub static STACK_REQUEST: StackSizeRequest = StackSizeRequest::new().with_size(KERNEL_STACK_SIZE);
+#[used] pub static MEM_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
 
-        .section .text
-        _start:
-            lea rsp, kernel_stack_bottom
-            lea rbp, kernel_stack_bottom
+// Kernel entry point
+#[no_mangle]
+unsafe extern "C" fn _start() -> ! {
+    assert!(BASE_REVISION.is_supported());
 
-            // *const BootInfo is still in rdi, we just pass it on
-            call kmain
-    "#
+    debug::init_debug_print();
+    debug_println!("[kernel] Kernel Started");
+
+    let mem_map = MEM_MAP_REQUEST.get_response().expect("No memory map given by the bootloader");
+
+    debug_print!("[kernel] Memory map:");
+
+    for (i, entry) in mem_map.entries().iter().enumerate() {
+        debug_println!("\nEntry {i}:");
+        debug_println!("\tbase: {}", entry.base);
+        debug_println!("\tlength: {}", entry.length);
+        debug_println!("\tentry_type: {:?}", entry.entry_type);
+    }
+
+    halt();
 }
 
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    loop {}
+fn rust_panic(info: &PanicInfo) -> ! {
+    debug_println!("\n**** KERNEL PANIC ****\n");
+    
+    debug_print!("Kernel panic occured at: ");
+
+    match info.location() {
+        Some(location) => debug_println!("{location}"),
+        None => debug_println!("(no location available)")
+    }
+
+    debug_print!("\nMessage: ");
+
+    match info.message() {
+        Some(msg) => debug::debug_print_helper(*msg),
+        None => debug_println!("(no message)")
+    }
+
+    halt();
 }
 
-#[no_mangle]
-pub extern "C" fn kmain(boot_info: *const BootInfo) -> ! {
-    sel4::debug_println!("Hello World!");
-    loop {}
+fn halt() -> ! {
+    x86_64::instructions::interrupts::disable();
+
+    loop {
+        x86_64::instructions::hlt();
+    }
 }
