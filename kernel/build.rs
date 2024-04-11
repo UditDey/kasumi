@@ -6,7 +6,7 @@ use std::ops::RangeInclusive;
 
 use fontdue::{Font, FontSettings};
 
-const FONT_SIZE: f32 = 13.8;
+const FONT_SIZE: f32 = 13.0;
 const CHAR_RANGE: RangeInclusive<char> = '!'..='~'; // ASCII char range
 const BRIGHTNESS_SCALE: f32 = 0.93;
 

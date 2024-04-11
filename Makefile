@@ -20,7 +20,7 @@ image: build
 	@sudo losetup -d /dev/loop0
 
 run: image
-	@qemu-system-x86_64 -drive format=raw,file=disk.img -cpu qemu64,pdpe1gb -serial mon:stdio
+	@qemu-system-x86_64 -drive format=raw,file=disk.img -cpu Broadwell,pdpe1gb -serial mon:stdio -d int -D qemu.log
 
 kernel:
 	@cd kernel; cargo build --release

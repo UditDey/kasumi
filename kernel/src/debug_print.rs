@@ -6,6 +6,9 @@ use limine::framebuffer::{Framebuffer, MemoryModel};
 
 use crate::FRAMEBUFFER_REQUEST;
 
+pub const HEADING_PREFIX: &str =    "[kernel] ";
+pub const SUBHEADING_PREFIX: &str = "       - ";
+
 include!(concat!(env!("OUT_DIR"), "/console_font.rs"));
 
 struct DebugPrinter {
@@ -37,6 +40,7 @@ impl DebugPrinter {
             // New line + carriage return
             '\n' => self.new_line(),
 
+            // Tab
             '\t' => for _ in 0..4 {
                 self.print_char(' ');
             },
@@ -115,17 +119,17 @@ impl DebugPrinter {
         unsafe {
             for row in 0..self.framebuffer.height() as usize - CHAR_HEIGHT {
                 let dst_ptr = self.framebuffer.addr().add(row * self.framebuffer.pitch() as usize);
-                let dst_row = slice::from_raw_parts_mut(dst_ptr, self.framebuffer.width() as usize);
+                let dst_row = slice::from_raw_parts_mut(dst_ptr, self.framebuffer.width() as usize * 4);
 
                 let src_ptr = self.framebuffer.addr().add((row + CHAR_HEIGHT) * self.framebuffer.pitch() as usize);
-                let src_row = slice::from_raw_parts_mut(src_ptr, self.framebuffer.width() as usize);
+                let src_row = slice::from_raw_parts_mut(src_ptr, self.framebuffer.width() as usize * 4);
 
                 dst_row.copy_from_slice(&src_row);
             }
 
             for row in (self.framebuffer.height() as usize - CHAR_HEIGHT)..self.framebuffer.height() as usize {
                 let dst_ptr = self.framebuffer.addr().add(row * self.framebuffer.pitch() as usize);
-                let dst_row = slice::from_raw_parts_mut(dst_ptr, self.framebuffer.width() as usize);
+                let dst_row = slice::from_raw_parts_mut(dst_ptr, self.framebuffer.width() as usize * 4);
 
                 dst_row.fill(0);
             }
@@ -135,7 +139,7 @@ impl DebugPrinter {
 
 static DEBUG_PRINTER: Spinlock<Option<DebugPrinter>> = Spinlock::new(None);
 
-pub fn init_debug_print() {
+pub fn init() {
     *DEBUG_PRINTER.lock() = DebugPrinter::new();
 }
 
@@ -161,11 +165,26 @@ pub fn debug_print_helper(args: fmt::Arguments) {
 
 #[macro_export]
 macro_rules! debug_print {
-    ($($arg:tt)*) => ($crate::debug::debug_print_helper(format_args!($($arg)*)));
+    ($prefix:expr; $($arg:tt)*) => {
+        $crate::debug_print!("{}{}", $prefix, format_args!($($arg)*));
+    };
+    
+    ($($arg:tt)*) => {
+        $crate::debug_print::debug_print_helper(format_args!($($arg)*))
+    };
 }
 
 #[macro_export]
 macro_rules! debug_println {
-    () => ($crate::debug_println!(""));
-    ($($arg:tt)*) => ($crate::debug_print!("{}\n", format_args!($($arg)*)));
+    () => {
+        $crate::debug_println!("")
+    };
+
+    ($prefix:expr; $($arg:tt)*) => {
+        $crate::debug_print!("{}{}\n", $prefix, format_args!($($arg)*))
+    };
+
+    ($($arg:tt)*) => {
+        $crate::debug_print!("{}\n", format_args!($($arg)*))
+    };
 }
