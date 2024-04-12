@@ -43,7 +43,7 @@ struct IsrData {
 }
 
 impl IsrData {
-    pub const fn new() -> Self {
+    pub const fn dummy() -> Self {
         Self {
             local_apic: LocalApic::dummy()
         }
@@ -53,7 +53,7 @@ impl IsrData {
 unsafe impl Send for IsrData {}
 unsafe impl Sync for IsrData {}
 
-static ISR_DATA: RwSpinlock<IsrData> = RwSpinlock::new(IsrData::new());
+static ISR_DATA: RwSpinlock<IsrData> = RwSpinlock::new(IsrData::dummy());
 
 pub struct LocalApic {
     base_addr: *mut u8
@@ -64,9 +64,9 @@ impl LocalApic {
         Self { base_addr: ptr::null_mut() }
     }
 
-    pub fn new(base_addr: *mut u8, hhdm_offset: usize) -> Self {
+    pub fn new(cpu_info: &CpuInfo, hhdm_offset: usize) -> Self {
         unsafe {
-            Self { base_addr: base_addr.add(hhdm_offset) }
+            Self { base_addr: cpu_info.local_apic_base.add(hhdm_offset) }
         }
     }
 
@@ -111,8 +111,8 @@ impl LocalApic {
         
         self.write_reg(
             LOCAL_APIC_TIMER_LVT,
-            1 << 17 |                       // Timer mode = periodic
-            SCHEDULER_TICK_INTERRUPT_VECTOR as u32 // We use APIC timer for scheduler ticks
+            1 << 17 |                               // Timer mode = periodic
+            SCHEDULER_TICK_INTERRUPT_VECTOR as u32  // We use APIC timer for scheduler ticks
         );
 
         // Setup spurious vector register
@@ -164,10 +164,10 @@ pub fn init(hhdm_offset: usize, cpu_info: &CpuInfo, acpi_info: &AcpiInfo) {
     }
 
     // Setup local APIC
-    let local_apic = LocalApic::new(cpu_info.local_apic_base, hhdm_offset);
+    let local_apic = LocalApic::new(cpu_info, hhdm_offset);
     
-    debug_println!(SUBHEADING_PREFIX; "Local APIC ID: {:#X}", local_apic.id());
     debug_println!(SUBHEADING_PREFIX; "Setting up local APIC");
+    debug_println!(SUBHEADING_PREFIX; "Local APIC ID: {:#X}", local_apic.id());
 
     local_apic.init();
 

@@ -1,28 +1,68 @@
 use spinning_top::Spinlock;
-use x86_64::{registers::segmentation::{Segment, SS, CS}, structures::{gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector}, tss::TaskStateSegment}};
 
-use crate::{debug_print::{HEADING_PREFIX, SUBHEADING_PREFIX}, debug_println};
+use x86_64::{
+    registers::segmentation::{Segment, CS, DS, ES, FS, GS, SS},
+    structures::{
+        gdt::{Descriptor, GlobalDescriptorTable, DescriptorFlags},
+        tss::TaskStateSegment
+    }
+};
 
-static GDT: Spinlock<GlobalDescriptorTable<8>> = Spinlock::new(GlobalDescriptorTable::new());
+use crate::{
+    debug_print::HEADING_PREFIX,
+    debug_println
+};
+
+static GDT: Spinlock<GlobalDescriptorTable<16>> = Spinlock::new(GlobalDescriptorTable::empty());
 static TSS: TaskStateSegment = TaskStateSegment::new();
 
 pub fn init() {
     debug_println!(HEADING_PREFIX; "Loading GDT");
 
+    // Fill GDT entries
+    // Reference:
+    // 1) https://github.com/TornaxO7/PornOS/blob/main/src/gdt/mod.rs
+    // 2) https://github.com/rust-osdev/x86_64/issues/389#issuecomment-1307420662
     let mut gdt = GDT.lock();
 
-    gdt.append(Descriptor::kernel_code_segment());
-    gdt.append(Descriptor::kernel_data_segment());
-    gdt.append(Descriptor::user_code_segment());
-    gdt.append(Descriptor::user_data_segment());
-    gdt.append(Descriptor::tss_segment(&TSS));
+    let code_16_bit = DescriptorFlags::USER_SEGMENT |
+                      DescriptorFlags::PRESENT |
+                      DescriptorFlags::LIMIT_0_15 |
+                      DescriptorFlags::ACCESSED |
+                      DescriptorFlags::EXECUTABLE;
     
-    // TODO: figure out GDT physical address
-    //debug_println!(SUBHEADING_PREFIX; "GDT address: {:#X}", &*gdt as *const _ as usize);
-    /*unsafe { gdt.load_unsafe(); }
+    gdt.append(Descriptor::UserSegment(code_16_bit.bits()));
+
+    let data_16_bit = DescriptorFlags::USER_SEGMENT |
+                      DescriptorFlags::PRESENT |
+                      DescriptorFlags::LIMIT_0_15 |
+                      DescriptorFlags::ACCESSED |
+                      DescriptorFlags::WRITABLE;
+    
+    gdt.append(Descriptor::UserSegment(data_16_bit.bits()));
+
+    let code_32_bit = DescriptorFlags::KERNEL_CODE32;
+    gdt.append(Descriptor::UserSegment(code_32_bit.bits()));
+
+    let data_32_bit = DescriptorFlags::KERNEL_DATA;
+    gdt.append(Descriptor::UserSegment(data_32_bit.bits()));
+
+    let code_64_bit = DescriptorFlags::KERNEL_CODE64;
+    let code_segment = gdt.append(Descriptor::UserSegment(code_64_bit.bits()));
+
+    let data_64_bit = DescriptorFlags::KERNEL_DATA;
+    let data_segment = gdt.append(Descriptor::UserSegment(data_64_bit.bits()));
+
+    gdt.append(Descriptor::tss_segment(&TSS));
 
     unsafe {
-        SS::set_reg(SegmentSelector::new(1, x86_64::PrivilegeLevel::Ring0));
-        CS::set_reg(SegmentSelector::new(0, x86_64::PrivilegeLevel::Ring0));
-    }*/
+        gdt.load_unsafe();
+
+        CS::set_reg(code_segment);
+        DS::set_reg(data_segment);
+        ES::set_reg(data_segment);
+        FS::set_reg(data_segment);
+        GS::set_reg(data_segment);
+        SS::set_reg(data_segment);
+    }
 }

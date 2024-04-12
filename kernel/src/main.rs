@@ -3,6 +3,7 @@
 
 #![feature(panic_info_message)]
 #![feature(abi_x86_interrupt)]
+#![feature(const_mut_refs)]
 
 mod debug_print;
 mod cpu_info;
@@ -10,6 +11,7 @@ mod gdt;
 mod acpi;
 mod interrupt;
 mod timer;
+mod mem;
 
 use core::panic::PanicInfo;
 
@@ -36,10 +38,10 @@ const KERNEL_STACK_SIZE: u64 = 128 * 1024; // 128 KiB
 
 // Limine bootloader requests
 #[used] pub static BASE_REVISION: BaseRevision = BaseRevision::new();
+#[used] pub static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
 #[used] pub static FRAMEBUFFER_REQUEST: FramebufferRequest = FramebufferRequest::new();
 #[used] pub static STACK_REQUEST: StackSizeRequest = StackSizeRequest::new().with_size(KERNEL_STACK_SIZE);
 #[used] pub static MEM_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
-#[used] pub static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
 #[used] pub static ACPI_RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
 
 // Kernel entry point
@@ -63,7 +65,10 @@ extern "C" fn _start() -> ! {
     gdt::init();
     interrupt::init(hhdm_offset, &cpu_info, &acpi_info);
     timer::init(hhdm_offset, &cpu_info, &acpi_info);
+    mem::init(hhdm_offset);
 
+    debug_println!(HEADING_PREFIX; "Kernel startup finished");
+    
     enable_interrupts();
     //unsafe { x86_64::instructions::interrupts::software_interrupt::<0x80>(); }
 
@@ -86,7 +91,7 @@ fn rust_panic(info: &PanicInfo) -> ! {
     debug_print!("\nMessage: ");
 
     match info.message() {
-        Some(msg) => debug_print::debug_print_helper(*msg),
+        Some(&msg) => debug_print::debug_print_helper(msg),
         None => debug_println!("(no message)")
     }
 
