@@ -1,5 +1,5 @@
 use raw_cpuid::CpuId;
-use x86_64::registers::model_specific::Msr;
+use x86_64::registers::model_specific::{Msr, Efer, EferFlags};
 
 use crate::{debug_print, debug_println, debug_print::{HEADING_PREFIX, SUBHEADING_PREFIX}};
 
@@ -56,8 +56,13 @@ pub fn init() -> CpuInfo {
 
     debug_println!(SUBHEADING_PREFIX; "Local APIC base address (from MSR): {apic_base:#X}");
 
-    // Make sure local APIC is enabled
-    unsafe { apic_base_msr.write(apic_base_msr.read() | APIC_BASE_MSR_ENABLE) }
+    unsafe {
+        // Make sure local APIC is enabled
+        apic_base_msr.write(apic_base_msr.read() | APIC_BASE_MSR_ENABLE);
+
+        // Enable syscall/sysret instructions
+        Efer::update(|flags| *flags |= EferFlags::SYSTEM_CALL_EXTENSIONS);
+    }
 
     CpuInfo { local_apic_base: apic_base as *mut u8 }
 }

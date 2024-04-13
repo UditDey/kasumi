@@ -4,6 +4,7 @@
 #![feature(panic_info_message)]
 #![feature(abi_x86_interrupt)]
 #![feature(const_mut_refs)]
+#![feature(naked_functions)]
 
 mod debug_print;
 mod cpu_info;
@@ -12,6 +13,7 @@ mod acpi;
 mod interrupt;
 mod timer;
 mod mem;
+mod syscall;
 
 use core::panic::PanicInfo;
 
@@ -62,15 +64,14 @@ extern "C" fn _start() -> ! {
 
     let cpu_info = cpu_info::init();
     let acpi_info = acpi::init(hhdm_offset);
-    gdt::init();
+    let gdt_info = gdt::init();
     interrupt::init(hhdm_offset, &cpu_info, &acpi_info);
     timer::init(hhdm_offset, &cpu_info, &acpi_info);
     mem::init(hhdm_offset);
+    syscall::init(&gdt_info);
 
     debug_println!(HEADING_PREFIX; "Kernel startup finished");
-    
     enable_interrupts();
-    //unsafe { x86_64::instructions::interrupts::software_interrupt::<0x80>(); }
 
     loop {
         cpu_halt();
