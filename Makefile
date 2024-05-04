@@ -1,4 +1,4 @@
-.PHONY: kernel build image run clean
+.PHONY: kernel userspace build image run clean
 
 image: build
 	@echo Creating disk.img...
@@ -14,6 +14,7 @@ image: build
 	@sudo cp /usr/share/limine/limine-bios.sys /mnt/boot
 	@sudo cp limine.cfg /mnt/boot
 	@sudo cp kernel/target/x86_64-bare-metal/release/kernel /mnt/boot
+	@sudo cp userspace/init/target/x86_64-userspace/release/init /mnt/boot
 	@echo Contents of /boot:
 	@ls /mnt/boot
 	@sudo umount /mnt
@@ -25,7 +26,11 @@ run: image
 kernel:
 	@cd kernel; cargo build --release
 
-build: kernel
+userspace:
+	@cd userspace/init; cargo build --release
+
+build: kernel userspace
 
 clean:
 	@cd kernel; cargo clean
+	@cd userspace/init; cargo clean

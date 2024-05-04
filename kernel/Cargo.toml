@@ -9,7 +9,7 @@ x86_64 = "0.15.1"
 raw-cpuid = "11.0.1"
 spinning_top = "0.3.0"
 acpi = { version = "5.0.0", default-features = false }
-elfloader = "0.16.0"
+xmas-elf = "0.9.1"
 
 [build-dependencies]
 fontdue = "0.8.0"

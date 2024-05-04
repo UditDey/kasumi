@@ -3,6 +3,7 @@ use core::arch::x86_64::_lzcnt_u64;
 
 use spinning_top::Spinlock;
 use limine::memory_map::{Entry, EntryType};
+use x86_64::structures::paging::PageTable;
 
 use crate::{
     MEM_MAP_REQUEST,
@@ -10,16 +11,16 @@ use crate::{
     debug_println
 };
 
-const PAGE_SIZE: u64 = 4096;
+pub const PAGE_SIZE: u64 = 4096;
 const ENTRIES_PER_PAGE: u64 = PAGE_SIZE / 64;
 
-struct FrameAlloc {
-    bitmap: &'static mut [u64],
+struct FrameAlloc<'a> {
+    bitmap: &'a mut [u64],
     last_used_entry: usize,
     max_addr: u64
 }
 
-impl FrameAlloc {
+impl<'a> FrameAlloc<'a> {
     pub const fn dummy() -> Self {
         Self {
             bitmap: &mut [],
@@ -77,7 +78,7 @@ impl FrameAlloc {
 
         // Else, start looking from the start
         let entries = &mut self.bitmap[..self.last_used_entry];
-        let addr = Self::alloc_in_entries(entries, 0);
+        let alloc = Self::alloc_in_entries(entries, 0);
 
         if let Some((addr, entry_idx)) = alloc {
             self.last_used_entry = entry_idx;
@@ -108,7 +109,7 @@ impl FrameAlloc {
     }
 }
 
-unsafe impl Send for FrameAlloc {}
+unsafe impl<'a> Send for FrameAlloc<'a> {}
 
 static FRAME_ALLOCATOR: Spinlock<FrameAlloc> = Spinlock::new(FrameAlloc::dummy());
 
@@ -189,4 +190,15 @@ pub fn init(hhdm_offset: usize) {
 
 fn usable_entry(entry: &Entry) -> bool {
     entry.entry_type == EntryType::USABLE || entry.entry_type == EntryType::BOOTLOADER_RECLAIMABLE
+}
+
+pub fn alloc_frame() -> Option<u64> {
+    FRAME_ALLOCATOR.lock().alloc_frame()
+}
+
+pub fn new_top_level_pt() -> Option<*mut PageTable> {
+    let pt = alloc_frame()? as *mut PageTable;
+    unsafe { pt.as_mut().unwrap().zero(); }
+
+    Some(pt)
 }

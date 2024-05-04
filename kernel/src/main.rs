@@ -14,6 +14,8 @@ mod interrupt;
 mod timer;
 mod mem;
 mod syscall;
+mod sched;
+mod init_proc;
 
 use core::panic::PanicInfo;
 
@@ -24,12 +26,13 @@ use limine::{
         MemoryMapRequest,
         HhdmRequest,
         RsdpRequest,
-        StackSizeRequest
+        StackSizeRequest,
+        ModuleRequest
     }
 };
 
 use x86_64::instructions::{
-    hlt as cpu_halt,
+    hlt,
     interrupts::disable as disable_interrupts,
     interrupts::enable as enable_interrupts
 };
@@ -45,6 +48,7 @@ const KERNEL_STACK_SIZE: u64 = 128 * 1024; // 128 KiB
 #[used] pub static STACK_REQUEST: StackSizeRequest = StackSizeRequest::new().with_size(KERNEL_STACK_SIZE);
 #[used] pub static MEM_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
 #[used] pub static ACPI_RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
+#[used] pub static MODULE_REQUEST: ModuleRequest = ModuleRequest::new();
 
 // Kernel entry point
 #[no_mangle]
@@ -69,12 +73,14 @@ extern "C" fn _start() -> ! {
     timer::init(hhdm_offset, &cpu_info, &acpi_info);
     mem::init(hhdm_offset);
     syscall::init(&gdt_info);
+    sched::init(hhdm_offset);
+    init_proc::init();
 
     debug_println!(HEADING_PREFIX; "Kernel startup finished");
     enable_interrupts();
 
     loop {
-        cpu_halt();
+        hlt();
     }
 }
 
@@ -96,13 +102,9 @@ fn rust_panic(info: &PanicInfo) -> ! {
         None => debug_println!("(no message)")
     }
 
-    halt();
-}
-
-fn halt() -> ! {
     disable_interrupts();
 
     loop {
-        cpu_halt();
+        hlt();
     }
 }
