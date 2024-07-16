@@ -1,83 +1,103 @@
 #![no_std]
 #![no_main]
+#![feature(integer_atomics)]
+// Enable all lint groups except restriction
+#![deny(
+    clippy::all,
+    clippy::correctness,
+    clippy::suspicious,
+    clippy::style,
+    clippy::complexity,
+    clippy::perf,
+    clippy::pedantic
+)]
+// Lints from the restrictions group
+#![deny(
+    clippy::allow_attributes_without_reason,
+    clippy::as_underscore,
+    clippy::deref_by_slicing,
+    clippy::else_if_without_else,
+    clippy::empty_enum_variants_with_brackets,
+    clippy::empty_structs_with_brackets,
+    clippy::float_arithmetic,
+    clippy::fn_to_numeric_cast_any,
+    clippy::if_then_some_else_none,
+    clippy::indexing_slicing,
+    clippy::map_err_ignore,
+    clippy::multiple_unsafe_ops_per_block,
+    clippy::pattern_type_mismatch,
+    clippy::tests_outside_test_module,
+    clippy::todo,
+    clippy::undocumented_unsafe_blocks,
+    clippy::unwrap_used
+)]
+#![warn(
+    clippy::empty_loop,
+    reason = "Empty loops can be useful while debugging so reduce that to a warning"
+)]
+#![allow(
+    clippy::struct_field_names,
+    reason = "Sometimes fields having common prefixes is useful (See PageAlloc)"
+)]
 
-#![feature(panic_info_message)]
-#![feature(abi_x86_interrupt)]
-#![feature(const_mut_refs)]
-#![feature(naked_functions)]
-
+mod cpuid;
 mod debug_print;
-mod cpu_info;
-mod gdt;
-mod acpi;
-mod interrupt;
-mod timer;
 mod mem;
-mod syscall;
-mod sched;
-mod init_proc;
 
+use core::fmt::Write;
 use core::panic::PanicInfo;
 
 use limine::{
+    request::{FramebufferRequest, HhdmRequest, MemoryMapRequest},
     BaseRevision,
-    request::{
-        FramebufferRequest,
-        MemoryMapRequest,
-        HhdmRequest,
-        RsdpRequest,
-        StackSizeRequest,
-        ModuleRequest
-    }
 };
 
 use x86_64::instructions::{
-    hlt,
-    interrupts::disable as disable_interrupts,
-    interrupts::enable as enable_interrupts
+    hlt, interrupts::disable as disable_interrupts, interrupts::enable as enable_interrupts,
 };
 
-use debug_print::HEADING_PREFIX;
-
-const KERNEL_STACK_SIZE: u64 = 128 * 1024; // 128 KiB
+use debug_print::{DebugPrintHelper, HEADING_PREFIX};
 
 // Limine bootloader requests
-#[used] pub static BASE_REVISION: BaseRevision = BaseRevision::new();
-#[used] pub static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
-#[used] pub static FRAMEBUFFER_REQUEST: FramebufferRequest = FramebufferRequest::new();
-#[used] pub static STACK_REQUEST: StackSizeRequest = StackSizeRequest::new().with_size(KERNEL_STACK_SIZE);
-#[used] pub static MEM_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
-#[used] pub static ACPI_RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
-#[used] pub static MODULE_REQUEST: ModuleRequest = ModuleRequest::new();
+//
+// These static structs contain magic constants, which limine will search for
+// in the kernel's memory region. Limine will then update these structs with
+// 'responses' before handing over control to us
+#[used]
+pub static BASE_REVISION: BaseRevision = BaseRevision::with_revision(1);
+#[used]
+pub static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
+#[used]
+pub static FRAMEBUFFER_REQUEST: FramebufferRequest = FramebufferRequest::new();
+#[used]
+pub static MEM_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
 
-// Kernel entry point
+/// Kernel entry point
 #[no_mangle]
 extern "C" fn _start() -> ! {
-    // Disable interrupts just to be sure
+    // Disable interrupts (just to be sure)
     disable_interrupts();
 
+    // Make sure limine supports our required base revision
     assert!(BASE_REVISION.is_supported());
 
-    let hhdm_offset = HHDM_REQUEST
+    // Get the base address of the higher-half direct map (HHDM)
+    //
+    // Limine will map the first 4 GiB to somewhere within the higher-half
+    // so the kernel can access memory outside itself. We use the HHDM to
+    // access the framebuffer, ACPI structures, MMIO, etc. We later expand
+    // the HHDM to cover all physical memory but the offset remains the same
+    let _hhdm_offset = HHDM_REQUEST
         .get_response()
         .expect("Bootloader did not give us an HHDM response")
-        .offset() as usize;
+        .offset();
 
+    // Start setting everything up
     debug_print::init();
     debug_println!(HEADING_PREFIX; "Kernel started");
 
-    let cpu_info = cpu_info::init();
-    let acpi_info = acpi::init(hhdm_offset);
-    let gdt_info = gdt::init();
-    interrupt::init(hhdm_offset, &cpu_info, &acpi_info);
-    timer::init(hhdm_offset, &cpu_info, &acpi_info);
-    mem::init(hhdm_offset);
-    syscall::init(&gdt_info);
-    sched::init(hhdm_offset);
-    init_proc::init();
-
-    debug_println!(HEADING_PREFIX; "Kernel startup finished");
-    enable_interrupts();
+    cpuid::check();
+    mem::init();
 
     loop {
         hlt();
@@ -87,20 +107,15 @@ extern "C" fn _start() -> ! {
 #[panic_handler]
 fn rust_panic(info: &PanicInfo) -> ! {
     debug_println!("\n**** KERNEL PANIC ****\n");
-    
+
     debug_print!("Kernel panic occured at: ");
 
     match info.location() {
         Some(location) => debug_println!("{location}"),
-        None => debug_println!("(no location available)")
+        None => debug_println!("(no location available)"),
     }
 
-    debug_print!("\nMessage: ");
-
-    match info.message() {
-        Some(&msg) => debug_print::debug_print_helper(msg),
-        None => debug_println!("(no message)")
-    }
+    _ = write!(DebugPrintHelper, "\nMessage: {}", info.message());
 
     disable_interrupts();
 

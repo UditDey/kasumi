@@ -11,10 +11,6 @@ const CHAR_RANGE: RangeInclusive<char> = '!'..='~'; // ASCII char range
 const BRIGHTNESS_SCALE: f32 = 0.93;
 
 pub fn main() {
-    // Tell cargo about our linker script
-    println!("cargo:rustc-link-arg=-Tlinker.ld");
-    println!("cargo:rerun-if-changed=linker.ld");
-
     // Build kernel console font
     let font_data = fs::read("NotoSansMono-Regular.ttf").unwrap();
     let font = Font::from_bytes(font_data, FontSettings::default()).unwrap();
@@ -35,10 +31,10 @@ pub fn main() {
 
     writeln!(
         &out_file,
-        "pub const CHAR_WIDTH: usize = {char_width};
-        pub const CHAR_HEIGHT: usize = {char_height};
+        "pub const CHAR_WIDTH: u64 = {char_width};
+        pub const CHAR_HEIGHT: u64 = {char_height};
 
-        pub type Glyph = &'static [&'static [u8; CHAR_WIDTH]; CHAR_HEIGHT];
+        pub type Glyph = &'static [&'static [u8; {char_width}]; {char_height}];
 
         pub const GLYPHS: &[Glyph] = &["
     ).unwrap();
@@ -50,7 +46,7 @@ pub fn main() {
         
         for x in 0..metrics.width as i32 {
             for y in 0..metrics.height as i32 {
-                let bitmap_x = x + metrics.xmin.max(0) as i32;
+                let bitmap_x = x + metrics.xmin.max(0);
                 let bitmap_y = y + baseline_y  - metrics.height as i32 - metrics.ymin;
 
                 let idx = x + (y * metrics.width as i32);

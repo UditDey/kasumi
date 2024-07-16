@@ -2,4 +2,3 @@ disk.img
 qemu.log
 
 kernel/target
-userspace/*/target
