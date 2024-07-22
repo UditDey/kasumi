@@ -4,4 +4,4 @@ build-std-features = ["compiler-builtins-mem"]
 
 [build]
 target = "target.json"
-rustflags = ["-C", "target-cpu=x86-64-v3", "-C", "link-arg=-Tlink.ld"]
+rustflags = ["-C", "link-arg=-Tlink.ld"]

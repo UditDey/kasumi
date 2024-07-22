@@ -40,17 +40,15 @@ pub fn check() {
     // Level 3 is the minimum level required by Kasumi and all components are
     // compiled targeting this level. We only check for level 3 features since
     // it implies all the previous levels are also supported
-    let level_3_supported = feature_info.has_avx() &&
-                            ext_info.has_avx2() &&
-                            ext_info.has_bmi1() &&
-                            ext_info.has_bmi2() &&
-                            feature_info.has_f16c() &&
-                            feature_info.has_fma() &&
-                            ext_ident.has_lzcnt() &&
-                            feature_info.has_movbe() &&
-                            feature_info.has_xsave();
-
-    assert!(level_3_supported, "CPU does not support x86_64 microarchitecture level 3");
+    assert!(feature_info.has_avx(), "CPU does not support x86_64-v3 feature: AVX");
+    assert!(ext_info.has_avx2(), "CPU does not support x86_64-v3 feature: AVX 2");
+    assert!(ext_info.has_bmi1(), "CPU does not support x86_64-v3 feature: BMI 1");
+    assert!(ext_info.has_bmi2(), "CPU does not support x86_64-v3 feature: BMI 2");
+    assert!(feature_info.has_f16c(), "CPU does not support x86_64-v3 feature: F16C");
+    assert!(feature_info.has_fma(), "CPU does not support x86_64-v3 feature: FMA");
+    assert!(ext_ident.has_lzcnt(), "CPU does not support x86_64-v3 feature: LZCNT");
+    assert!(feature_info.has_movbe(), "CPU does not support x86_64-v3 feature: MOVBE");
+    assert!(feature_info.has_xsave(), "CPU does not support x86_64-v3 feature: XSAVE");
 
     // Check other required features
     assert!(feature_info.has_apic(), "CPU does not support APIC");

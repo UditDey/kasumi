@@ -31,13 +31,14 @@
     clippy::undocumented_unsafe_blocks,
     clippy::unwrap_used
 )]
+// Relax some lints
 #![warn(
     clippy::empty_loop,
     reason = "Empty loops can be useful while debugging so reduce that to a warning"
 )]
 #![allow(
-    clippy::struct_field_names,
-    reason = "Sometimes fields having common prefixes is useful (See PageAlloc)"
+    clippy::pattern_type_mismatch,
+    reason = "This lint cannot always be satisfied when matching struct-like enum variants"
 )]
 
 mod cpuid;
@@ -56,7 +57,7 @@ use x86_64::instructions::{
     hlt, interrupts::disable as disable_interrupts, interrupts::enable as enable_interrupts,
 };
 
-use debug_print::{DebugPrintHelper, HEADING_PREFIX};
+use debug_print::HEADING_PREFIX;
 
 // Limine bootloader requests
 //
@@ -81,7 +82,7 @@ extern "C" fn _start() -> ! {
     // Make sure limine supports our required base revision
     assert!(BASE_REVISION.is_supported());
 
-    // Get the base address of the higher-half direct map (HHDM)
+    /*/ Get the base address of the higher-half direct map (HHDM)
     //
     // Limine will map the first 4 GiB to somewhere within the higher-half
     // so the kernel can access memory outside itself. We use the HHDM to
@@ -90,7 +91,7 @@ extern "C" fn _start() -> ! {
     let _hhdm_offset = HHDM_REQUEST
         .get_response()
         .expect("Bootloader did not give us an HHDM response")
-        .offset();
+        .offset();*/
 
     // Start setting everything up
     debug_print::init();
@@ -115,7 +116,7 @@ fn rust_panic(info: &PanicInfo) -> ! {
         None => debug_println!("(no location available)"),
     }
 
-    _ = write!(DebugPrintHelper, "\nMessage: {}", info.message());
+    _ = write!(debug_print::Helper, "\nMessage: {}", info.message());
 
     disable_interrupts();
 

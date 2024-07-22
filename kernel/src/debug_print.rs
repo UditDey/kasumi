@@ -238,9 +238,9 @@ pub fn init() {
     *DEBUG_PRINTER.lock() = DebugPrinter::new();
 }
 
-pub struct DebugPrintHelper;
+pub struct Helper;
 
-impl core::fmt::Write for DebugPrintHelper {
+impl core::fmt::Write for Helper {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         let mut printer = DEBUG_PRINTER.lock();
 
@@ -254,8 +254,8 @@ impl core::fmt::Write for DebugPrintHelper {
     }
 }
 
-pub fn print_helper(args: core::fmt::Arguments) {
-    _ = core::fmt::write(&mut DebugPrintHelper, args);
+pub fn helper(args: core::fmt::Arguments) {
+    _ = core::fmt::write(&mut Helper, args);
 }
 
 #[macro_export]
@@ -265,7 +265,7 @@ macro_rules! debug_print {
     };
 
     ($($arg:tt)*) => {
-        $crate::debug_print::print_helper(format_args!($($arg)*))
+        $crate::debug_print::helper(format_args!($($arg)*))
     };
 }
 
