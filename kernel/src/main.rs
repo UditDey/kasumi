@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(integer_atomics)]
+#![feature(atomic_from_mut)]
 // Enable all lint groups except restriction
 #![deny(
     clippy::all,
@@ -53,9 +54,7 @@ use limine::{
     BaseRevision,
 };
 
-use x86_64::instructions::{
-    hlt, interrupts::disable as disable_interrupts, interrupts::enable as enable_interrupts,
-};
+use x86_64::instructions::{hlt, interrupts::disable as disable_interrupts, interrupts::enable as enable_interrupts};
 
 use debug_print::HEADING_PREFIX;
 

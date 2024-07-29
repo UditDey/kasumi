@@ -1,6 +1,10 @@
 use raw_cpuid::CpuId;
 
-use crate::{debug_print, debug_println, debug_print::{HEADING_PREFIX, SUBHEADING_PREFIX}};
+use crate::{
+    debug_print,
+    debug_print::{HEADING_PREFIX, SUBHEADING_PREFIX},
+    debug_println,
+};
 
 /// Checks for required CPU features
 pub fn check() {
@@ -15,13 +19,11 @@ pub fn check() {
 
     match vendor_info {
         Some(info) => debug_println!("{}", info.as_str()),
-        None => debug_println!("(no vendor info available)")
+        None => debug_println!("(no vendor info available)"),
     }
 
     // Get feature support
-    let feature_info = cpuid
-        .get_feature_info()
-        .expect("Couldn't get CPUID feature info");
+    let feature_info = cpuid.get_feature_info().expect("Couldn't get CPUID feature info");
 
     let ext_info = cpuid
         .get_extended_feature_info()

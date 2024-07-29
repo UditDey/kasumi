@@ -26,17 +26,12 @@ unsafe impl Send for DebugPrinter {}
 impl DebugPrinter {
     pub fn new() -> Option<Self> {
         // We only support 32 bit RGB framebuffers
-        let framebuf_filter = |framebuf: &Framebuffer| {
-            framebuf.memory_model() == MemoryModel::RGB && framebuf.bpp() == 32
-        };
+        let framebuf_filter = |framebuf: &Framebuffer| framebuf.memory_model() == MemoryModel::RGB && framebuf.bpp() == 32;
 
         // Find the first framebuffer that matches our condition
         // If theres no response or suitable framebuffer we just return `None` and
         // debug printing won't happen
-        let framebuf = FRAMEBUFFER_REQUEST
-            .get_response()?
-            .framebuffers()
-            .find(framebuf_filter)?;
+        let framebuf = FRAMEBUFFER_REQUEST.get_response()?.framebuffers().find(framebuf_filter)?;
 
         // We have to make a copy of all data limine gives us since it all lives
         // in bootloader reclaimable memory, which means once we do reclaim it,
@@ -109,14 +104,8 @@ impl DebugPrinter {
                 // Draw the character
                 for y in 0..CHAR_HEIGHT {
                     for x in 0..CHAR_WIDTH {
-                        #[allow(
-                            clippy::cast_possible_truncation,
-                            reason = "usize and u64 have same size here"
-                        )]
-                        #[allow(
-                            clippy::indexing_slicing,
-                            reason = "x/y will always be in CHAR_WIDTH/CHAR_HEIGHT range"
-                        )]
+                        #[allow(clippy::cast_possible_truncation, reason = "usize and u64 have same size here")]
+                        #[allow(clippy::indexing_slicing, reason = "x/y will always be in CHAR_WIDTH/CHAR_HEIGHT range")]
                         let coverage = glyph[y as usize][x as usize];
 
                         self.draw_pixel(x_offset + x, y_offset + y, coverage, coverage, coverage);
@@ -139,10 +128,7 @@ impl DebugPrinter {
         self.framebuf_height / CHAR_HEIGHT
     }
 
-    #[allow(
-        clippy::many_single_char_names,
-        reason = "Variable meanings are obvious"
-    )]
+    #[allow(clippy::many_single_char_names, reason = "Variable meanings are obvious")]
     fn draw_pixel(&self, x: u64, y: u64, r: u8, g: u8, b: u8) {
         // x/y should be within the framebuffer's bounds
         assert!(x < self.framebuf_width, "x outside of framebuffer bounds");
@@ -151,10 +137,7 @@ impl DebugPrinter {
         // x * 4 because 32 bit RGB has 4 bytes per pixel
         let offset = (x * 4) + (y * self.framebuf_pitch);
 
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "usize and u64 have same size here"
-        )]
+        #[allow(clippy::cast_possible_truncation, reason = "usize and u64 have same size here")]
         let offset = offset as usize;
 
         let color = (u32::from(r) << self.framebuf_red_shift)
@@ -166,10 +149,7 @@ impl DebugPrinter {
         // given us correct framebuffer info overall
         let ptr = unsafe { self.framebuf_addr.add(offset) };
 
-        #[allow(
-            clippy::cast_ptr_alignment,
-            reason = "ptr was tested to have u32 alignment in `new()`"
-        )]
+        #[allow(clippy::cast_ptr_alignment, reason = "ptr was tested to have u32 alignment in `new()`")]
         let ptr = ptr.cast::<u32>();
 
         // SAFETY: ptr is a valid pointer within the framebuffer
@@ -196,10 +176,7 @@ impl DebugPrinter {
         let line = |y: u64| {
             assert!(y < self.framebuf_height, "y outside of framebuffer bounds");
 
-            #[allow(
-                clippy::cast_possible_truncation,
-                reason = "usize and u64 have same size here"
-            )]
+            #[allow(clippy::cast_possible_truncation, reason = "usize and u64 have same size here")]
             let offset = (y * self.framebuf_pitch) as usize;
 
             // SAFETY: This offset pointer is guaranteed to be within the framebuffer bounds
@@ -207,10 +184,7 @@ impl DebugPrinter {
             let ptr = unsafe { self.framebuf_addr.add(offset) };
 
             // Length of the slice, * 4 because we have 4 bytes per pixel
-            #[allow(
-                clippy::cast_possible_truncation,
-                reason = "usize and u64 have same size here"
-            )]
+            #[allow(clippy::cast_possible_truncation, reason = "usize and u64 have same size here")]
             let len = self.framebuf_width as usize * 4;
 
             // SAFETY: `ptr` is a valid pointer to the start of a line with length `len`
