@@ -2,3 +2,4 @@ disk.img
 qemu.log
 
 kernel/target
+kernel_algo/target

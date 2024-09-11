@@ -59,11 +59,7 @@ enum BlockAlloc {
     OneGiB(AtomicU128, &'static mut [AtomicU128; 16], &'static mut [AtomicU128; 16 * 128]),
     TwoGiB(AtomicU128, &'static mut [AtomicU128; 32], &'static mut [AtomicU128; 32 * 128]),
     FourGiB(AtomicU128, &'static mut [AtomicU128; 64], &'static mut [AtomicU128; 64 * 128]),
-    EightGiB(
-        AtomicU128,
-        &'static mut [AtomicU128; 128],
-        &'static mut [AtomicU128; 128 * 128],
-    ),
+    EightGiB(AtomicU128, &'static mut [AtomicU128; 128], &'static mut [AtomicU128; 128 * 128]),
 }
 
 impl BlockAlloc {
@@ -110,11 +106,7 @@ impl BlockAlloc {
             let level_one = AtomicU128::from_mut_slice(level_one);
             let level_two = AtomicU128::from_mut_slice(level_two);
 
-            Self::FiveOneTwoMiB(
-                AtomicU128::new(0),
-                level_one.try_into().unwrap(),
-                level_two.try_into().unwrap(),
-            )
+            Self::FiveOneTwoMiB(AtomicU128::new(0), level_one.try_into().unwrap(), level_two.try_into().unwrap())
         } else if size <= GIB {
             let level_one = bump.alloc_slice_uninit::<u128>(16);
             let level_two = bump.alloc_slice_uninit::<u128>(16 * 128);
@@ -125,11 +117,7 @@ impl BlockAlloc {
             let level_one = AtomicU128::from_mut_slice(level_one);
             let level_two = AtomicU128::from_mut_slice(level_two);
 
-            Self::OneGiB(
-                AtomicU128::new(0),
-                level_one.try_into().unwrap(),
-                level_two.try_into().unwrap(),
-            )
+            Self::OneGiB(AtomicU128::new(0), level_one.try_into().unwrap(), level_two.try_into().unwrap())
         } else if size <= 2 * GIB {
             let level_one = bump.alloc_slice_uninit::<u128>(32);
             let level_two = bump.alloc_slice_uninit::<u128>(32 * 128);
@@ -140,11 +128,7 @@ impl BlockAlloc {
             let level_one = AtomicU128::from_mut_slice(level_one);
             let level_two = AtomicU128::from_mut_slice(level_two);
 
-            Self::TwoGiB(
-                AtomicU128::new(0),
-                level_one.try_into().unwrap(),
-                level_two.try_into().unwrap(),
-            )
+            Self::TwoGiB(AtomicU128::new(0), level_one.try_into().unwrap(), level_two.try_into().unwrap())
         } else if size <= 4 * GIB {
             let level_one = bump.alloc_slice_uninit::<u128>(64);
             let level_two = bump.alloc_slice_uninit::<u128>(64 * 128);
@@ -155,11 +139,7 @@ impl BlockAlloc {
             let level_one = AtomicU128::from_mut_slice(level_one);
             let level_two = AtomicU128::from_mut_slice(level_two);
 
-            Self::FourGiB(
-                AtomicU128::new(0),
-                level_one.try_into().unwrap(),
-                level_two.try_into().unwrap(),
-            )
+            Self::FourGiB(AtomicU128::new(0), level_one.try_into().unwrap(), level_two.try_into().unwrap())
         } else {
             let level_one = bump.alloc_slice_uninit::<u128>(128);
             let level_two = bump.alloc_slice_uninit::<u128>(128 * 128);
@@ -170,11 +150,7 @@ impl BlockAlloc {
             let level_one = AtomicU128::from_mut_slice(level_one);
             let level_two = AtomicU128::from_mut_slice(level_two);
 
-            Self::EightGiB(
-                AtomicU128::new(0),
-                level_one.try_into().unwrap(),
-                level_two.try_into().unwrap(),
-            )
+            Self::EightGiB(AtomicU128::new(0), level_one.try_into().unwrap(), level_two.try_into().unwrap())
         }
     }
 
@@ -243,12 +219,7 @@ impl BlockAlloc {
         }
     }
 
-    fn search_three_level(
-        level_one: &AtomicU128,
-        level_one_size: u32,
-        level_two: &[AtomicU128],
-        level_three: &[AtomicU128],
-    ) -> Option<PageNum> {
+    fn search_three_level(level_one: &AtomicU128, level_one_size: u32, level_two: &[AtomicU128], level_three: &[AtomicU128]) -> Option<PageNum> {
         loop {
             // Load the level one bitmap and find a free index
             let level_two_idx = level_one.load(Ordering::Acquire).trailing_ones();
@@ -336,9 +307,7 @@ static PAGE_ALLOC: PageAlloc = PageAlloc::uninit();
 
 pub fn init() {
     // Get the memory map from the bootloader
-    let mem_map = MEM_MAP_REQUEST
-        .get_response()
-        .expect("Bootloader did not give us a memory map response");
+    let mem_map = MEM_MAP_REQUEST.get_response().expect("Bootloader did not give us a memory map response");
 
     // Filter the usable memory entries
     let is_usable = |entry: &Entry| {

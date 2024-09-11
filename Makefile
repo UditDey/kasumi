@@ -5,10 +5,6 @@
 kernel_check:
 	@cd kernel; cargo clippy
 
-.PHONY: kernel_test
-kernel_test:
-	@cd kernel_lib; cargo test
-
 .PHONY: kernel_build
 kernel_build:
 	@cd kernel; cargo build --release
@@ -21,9 +17,6 @@ kernel_clean:
 # Top level targets
 .PHONY: check
 check: kernel_check
-
-.PHONY: test
-test: kernel_test
 
 .PHONY: build
 build: kernel_build

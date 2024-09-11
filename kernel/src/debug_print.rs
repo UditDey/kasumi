@@ -97,9 +97,7 @@ impl DebugPrinter {
                 let y_offset = self.cursor_y * CHAR_HEIGHT;
 
                 // Glyph coverage bitmap for this character
-                let glyph = GLYPHS
-                    .get(c as usize - '!' as usize)
-                    .expect("Character outside of ASCII range");
+                let glyph = GLYPHS.get(c as usize - '!' as usize).expect("Character outside of ASCII range");
 
                 // Draw the character
                 for y in 0..CHAR_HEIGHT {
@@ -140,9 +138,8 @@ impl DebugPrinter {
         #[allow(clippy::cast_possible_truncation, reason = "usize and u64 have same size here")]
         let offset = offset as usize;
 
-        let color = (u32::from(r) << self.framebuf_red_shift)
-            | (u32::from(g) << self.framebuf_green_shift)
-            | (u32::from(b) << self.framebuf_blue_shift);
+        let color =
+            (u32::from(r) << self.framebuf_red_shift) | (u32::from(g) << self.framebuf_green_shift) | (u32::from(b) << self.framebuf_blue_shift);
 
         // SAFETY: This offset pointer is guaranteed to be within the framebuffer bounds
         // because x/y are within the width/height range and we trust that limine has

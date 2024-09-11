@@ -33,10 +33,7 @@
     clippy::unwrap_used
 )]
 // Relax some lints
-#![warn(
-    clippy::empty_loop,
-    reason = "Empty loops can be useful while debugging so reduce that to a warning"
-)]
+#![warn(clippy::empty_loop, reason = "Empty loops can be useful while debugging so reduce that to a warning")]
 #![allow(
     clippy::pattern_type_mismatch,
     reason = "This lint cannot always be satisfied when matching struct-like enum variants"
