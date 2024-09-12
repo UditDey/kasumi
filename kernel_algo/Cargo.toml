@@ -8,5 +8,8 @@ edition = "2021"
 [target.'cfg(loom)'.dependencies]
 loom = "0.7.2"
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
+
 [dev-dependencies]
 nanorand = "0.7.0"

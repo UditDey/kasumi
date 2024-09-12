@@ -513,7 +513,7 @@ mod tests {
         }
     }
 
-    //#[test]
+    #[test]
     #[cfg(loom)]
     fn test_tree_height_1_loom() {
         // Similar to test_tree_height_1() but we verify with concurrent accesses
@@ -569,7 +569,7 @@ mod tests {
         });
     }
 
-    //#[test]
+    #[test]
     #[cfg(loom)]
     fn test_tree_height_2_loom() {
         // Similar to test_tree_height_2() but we verify with concurrent accesses
