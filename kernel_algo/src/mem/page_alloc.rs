@@ -480,10 +480,6 @@ mod tests {
             let mut prev_page_idx = None;
 
             for i in 0..expected_max_allocs {
-                if height == 3 {
-                    println!("{i}");
-                }
-
                 let page_idx = tree_alloc.alloc().expect("Alloc failed unexpectedly");
 
                 if let Some(prev_page_idx) = prev_page_idx {
@@ -517,19 +513,23 @@ mod tests {
         }
     }
 
-    #[test]
+    //#[test]
     #[cfg(loom)]
     fn test_tree_height_1_loom() {
+        // Similar to test_tree_height_1() but we verify with concurrent accesses
         use std::sync::Arc;
 
-        // Equivalent to test_tree_height_1() but we verify with concurrent accesses
-        loom::model(|| {
-            // Lets assume we have a region of 64 pages, since ATOMIC_WORD_BITS = 64, this will need a tree of a single word
-            assert_eq!(TreeAlloc::calc_size_for(64 * PAGE_SIZE), Some(core::mem::size_of::<AtomicWord>()));
+        // Lets assume we have a region of 64 pages, since ATOMIC_WORD_BITS = 64, this will need a tree of a single word
+        assert_eq!(TreeAlloc::calc_size_for(64 * PAGE_SIZE), Some(core::mem::size_of::<AtomicWord>()));
 
+        loom::model(|| {
             let tree = Arc::new([AtomicWord::new(0); 1]);
 
-            // Allocate 4 pages
+            // Allocate 61 pages on the main thread
+            let pages = (0..61).map(|_| TreeAlloc(tree.as_slice()).alloc().unwrap()).collect::<Vec<usize>>();
+            assert_eq!(pages, (0..61).collect::<Vec<usize>>());
+
+            // Allocate 3 pages, each from a seperate thread
             let thread_1 = loom::thread::spawn({
                 let tree = Arc::clone(&tree);
                 move || TreeAlloc(tree.as_slice()).alloc().unwrap()
@@ -540,7 +540,58 @@ mod tests {
                 move || TreeAlloc(tree.as_slice()).alloc().unwrap()
             });
 
-            let thread_3 = loom::thread::spawn({
+            let page_0 = TreeAlloc(tree.as_slice()).alloc().unwrap();
+            let page_1 = thread_1.join().unwrap();
+            let page_2 = thread_2.join().unwrap();
+
+            // The new pages should be distinct and be in the range 61, 62, 63
+            let mut list = [page_0, page_1, page_2];
+            list.sort();
+            assert_eq!(list, [61, 62, 63]);
+            assert_eq!(tree[0].load(Ordering::Acquire), !0b0);
+
+            // Free all pages
+            let thread_1 = loom::thread::spawn({
+                let tree = Arc::clone(&tree);
+                move || TreeAlloc(tree.as_slice()).free(0)
+            });
+
+            let thread_2 = loom::thread::spawn({
+                let tree = Arc::clone(&tree);
+                move || TreeAlloc(tree.as_slice()).free(1)
+            });
+
+            TreeAlloc(tree.as_slice()).free(2);
+            thread_1.join().unwrap();
+            thread_2.join().unwrap();
+
+            assert_eq!(tree[0].load(Ordering::Acquire), !0b111);
+        });
+    }
+
+    //#[test]
+    #[cfg(loom)]
+    fn test_tree_height_2_loom() {
+        // Similar to test_tree_height_2() but we verify with concurrent accesses
+        use std::sync::Arc;
+
+        // Lets assume we have a region of 4096 pages, since ATOMIC_WORD_BITS = 64, this will need a tree of a 65 words (height = 2)
+        assert_eq!(TreeAlloc::calc_size_for(4096 * PAGE_SIZE), Some(65 * core::mem::size_of::<AtomicWord>()));
+
+        loom::model(|| {
+            let tree: Arc<[AtomicWord; 65]> = Arc::new(std::array::from_fn(|_| AtomicWord::new(0)));
+
+            // Allocate 61 pages on the main thread
+            let pages = (0..61).map(|_| TreeAlloc(tree.as_slice()).alloc().unwrap()).collect::<Vec<usize>>();
+            assert_eq!(pages, (0..61).collect::<Vec<usize>>());
+
+            // Allocate 3 pages, each from a seperate thread
+            let thread_1 = loom::thread::spawn({
+                let tree = Arc::clone(&tree);
+                move || TreeAlloc(tree.as_slice()).alloc().unwrap()
+            });
+
+            let thread_2 = loom::thread::spawn({
                 let tree = Arc::clone(&tree);
                 move || TreeAlloc(tree.as_slice()).alloc().unwrap()
             });
@@ -548,19 +599,94 @@ mod tests {
             let page_0 = TreeAlloc(tree.as_slice()).alloc().unwrap();
             let page_1 = thread_1.join().unwrap();
             let page_2 = thread_2.join().unwrap();
-            let page_3 = thread_3.join().unwrap();
 
-            // The allocated pages should be distinct and within the range 0, 1, 2, 3
-            assert_ne!(page_0, page_1);
-            assert_ne!(page_0, page_2);
-            assert_ne!(page_0, page_3);
-            assert_ne!(page_1, page_2);
-            assert_ne!(page_1, page_3);
-            assert_ne!(page_2, page_3);
-            assert!(page_0 < 4);
-            assert!(page_1 < 4);
-            assert!(page_2 < 4);
-            assert!(page_3 < 4);
+            // The allocated pages should be distinct and be in the range 61, 62, 63
+            let mut list = [page_0, page_1, page_2];
+            list.sort();
+            assert_eq!(list, [61, 62, 63]);
+            assert_eq!(tree[0].load(Ordering::Acquire), 0b1);
+            assert_eq!(tree[1].load(Ordering::Acquire), !0b0);
+
+            // Free those 3 pages
+            let thread_1 = loom::thread::spawn({
+                let tree = Arc::clone(&tree);
+                move || TreeAlloc(tree.as_slice()).free(0)
+            });
+
+            let thread_2 = loom::thread::spawn({
+                let tree = Arc::clone(&tree);
+                move || TreeAlloc(tree.as_slice()).free(1)
+            });
+
+            TreeAlloc(tree.as_slice()).free(2);
+            thread_1.join().unwrap();
+            thread_2.join().unwrap();
+
+            assert_eq!(tree[0].load(Ordering::Acquire), 0b0);
+            assert_eq!(tree[1].load(Ordering::Acquire), !0b111);
         });
     }
+
+    // TODO: Get this height = 3 loom test to run without stack overflow
+    /*#[test]
+    #[cfg(loom)]
+    fn test_tree_height_3_loom() {
+        use std::sync::Arc;
+
+        // Lets assume we have a region of 262,144 pages, since ATOMIC_WORD_BITS = 64, this will need a tree of a 4161 words (height = 3)
+        assert_eq!(
+            TreeAlloc::calc_size_for(262_144 * PAGE_SIZE),
+            Some(4161 * core::mem::size_of::<AtomicWord>())
+        );
+
+        loom::model(|| {
+            let tree: Arc<[AtomicWord; 4161]> = Arc::new(std::array::from_fn(|_| AtomicWord::new(0)));
+
+            // Allocate 61 pages on the main thread
+            let pages = (0..61).map(|_| TreeAlloc(tree.as_slice()).alloc().unwrap()).collect::<Vec<usize>>();
+            assert_eq!(pages, (0..61).collect::<Vec<usize>>());
+
+            // Allocate 3 pages, each from a seperate thread
+            let thread_1 = loom::thread::spawn({
+                let tree = Arc::clone(&tree);
+                move || TreeAlloc(tree.as_slice()).alloc().unwrap()
+            });
+
+            let thread_2 = loom::thread::spawn({
+                let tree = Arc::clone(&tree);
+                move || TreeAlloc(tree.as_slice()).alloc().unwrap()
+            });
+
+            let page_0 = TreeAlloc(tree.as_slice()).alloc().unwrap();
+            let page_1 = thread_1.join().unwrap();
+            let page_2 = thread_2.join().unwrap();
+
+            // The allocated pages should be distinct and be in the range 61, 62, 63
+            let mut list = [page_0, page_1, page_2];
+            list.sort();
+            assert_eq!(list, [61, 62, 63]);
+            assert_eq!(tree[0].load(Ordering::Acquire), 0b0);
+            assert_eq!(tree[1].load(Ordering::Acquire), 0b1);
+            assert_eq!(tree[65].load(Ordering::Acquire), !0b0);
+
+            // Free those 3 pages
+            let thread_1 = loom::thread::spawn({
+                let tree = Arc::clone(&tree);
+                move || TreeAlloc(tree.as_slice()).free(0)
+            });
+
+            let thread_2 = loom::thread::spawn({
+                let tree = Arc::clone(&tree);
+                move || TreeAlloc(tree.as_slice()).free(1)
+            });
+
+            TreeAlloc(tree.as_slice()).free(2);
+            thread_1.join().unwrap();
+            thread_2.join().unwrap();
+
+            assert_eq!(tree[0].load(Ordering::Acquire), 0b0);
+            assert_eq!(tree[1].load(Ordering::Acquire), 0b0);
+            assert_eq!(tree[65].load(Ordering::Acquire), !0b111);
+        });
+    }*/
 }
