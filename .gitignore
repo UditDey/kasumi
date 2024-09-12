@@ -1,5 +1,6 @@
 disk.img
 qemu.log
+asm
 
 kernel/target
 kernel_algo/target
