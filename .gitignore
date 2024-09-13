@@ -1,3 +1,5 @@
+.vscode
+
 disk.img
 qemu.log
 asm

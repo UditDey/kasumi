@@ -1,4 +1,8 @@
-pub mod page_alloc;
+mod bump_alloc;
+mod page_alloc;
+
+pub use bump_alloc::BumpAlloc;
+pub use page_alloc::PageAlloc;
 
 /// A physical address
 pub type PAddr = usize;

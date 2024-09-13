@@ -4,7 +4,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 #[cfg(loom)]
 use loom::sync::atomic::{AtomicU64, Ordering};
 
-use super::{PageNum, PAGE_SIZE};
+use super::{BumpAlloc, PageNum, PAGE_SIZE};
 
 type AtomicWord = AtomicU64;
 const ATOMIC_WORD_BITS: usize = 64;
@@ -55,10 +55,10 @@ impl<'a> TreeAlloc<'a> {
         }
     }
 
-    /// Calculates the space (in bytes) required for a tree alloc for a region based on its length (also in bytes)
+    /// Calculates the number of [`AtomicWord`]s required for a tree alloc for a region based on its length (in bytes)
     ///
     /// Returns 'None" if the region is too large and the height of the tree will exceed `MAX_HEIGHT`
-    pub fn calc_size_for(len: usize) -> Option<usize> {
+    pub fn calc_words(len: usize) -> Option<usize> {
         // Pages occupied by this region
         let num_pages = len.div_ceil(PAGE_SIZE);
 
@@ -66,7 +66,7 @@ impl<'a> TreeAlloc<'a> {
         let num_leaf_words_unrounded = num_pages.div_ceil(ATOMIC_WORD_BITS);
 
         // Number of leaf words rounded up to actually be a valid tree shape
-        // (rounded up to be a power of ATOMIC_WORD_BITS)
+        // (rounded up to be a power of ATOMIC_WORD_BITS, excluding 1)
         let num_leaf_words = Self::round_up_to_power(num_leaf_words_unrounded, ATOMIC_WORD_BITS);
 
         if Self::height_from_leaf_words(num_leaf_words) > Self::MAX_HEIGHT as usize {
@@ -75,9 +75,7 @@ impl<'a> TreeAlloc<'a> {
 
         // Total number of words in the tree
         let num_total_words = Self::total_words_from_leaf_words(num_leaf_words);
-
-        // Space needed for the tree
-        Some(num_total_words * core::mem::size_of::<AtomicWord>())
+        Some(num_total_words)
     }
 
     pub fn alloc(&self) -> Option<usize> {
@@ -180,11 +178,79 @@ struct Region<'a> {
     tree: TreeAlloc<'a>,
 }
 
+impl<'a> Region<'a> {
+    pub fn alloc(&self) -> Option<PageNum> {
+        self.tree
+            .alloc()
+            .map(|page_idx| self.base_page + page_idx)
+            .filter(|&page_num| page_num < self.max_page)
+    }
+}
+
 pub struct PageAlloc<'a> {
     regions: &'a [Region<'a>],
 }
 
-impl<'a> PageAlloc<'a> {}
+impl<'a> PageAlloc<'a> {
+    /// Mock initialises the page alloc
+    ///
+    /// This is step 1 of the process of setting up kernel structures. This only helps calculate the space taken by the page
+    /// allocator so we can map the required memory in. See [`BumpAlloc`] for more
+    ///
+    /// This takes an iterator of usable memory regions, where each item is a `(base_address, len)` pair
+    ///
+    /// # Panics
+    /// Panics if any region's size is too large. See [`TreeAlloc::calc_words()`] for more
+    pub fn init_mock(bump: &mut BumpAlloc, regions: impl ExactSizeIterator<Item = (usize, usize)>) {
+        // Add space for region list
+        bump.alloc_slice_mock::<Region>(regions.len());
+
+        // Add space for each region's tree
+        for region in regions {
+            let num_words = TreeAlloc::calc_words(region.1).expect("Region size too large");
+            bump.alloc_slice_mock::<AtomicWord>(num_words);
+        }
+    }
+
+    /// Actually initializes the page alloc
+    ///
+    /// This is step 2 of the process of setting up kernel structures. Once the required memory has been mapped in after the
+    /// mock init, this function will setup the actual page allocator
+    ///
+    /// # Panics
+    /// Panics if any region's size is too large. See [`TreeAlloc::calc_words()`] for more
+    pub fn init(bump: &mut BumpAlloc<'a>, regions: impl ExactSizeIterator<Item = (usize, usize)>) -> Self {
+        // Allocate the region list
+        let region_list = bump.alloc_slice::<Region>(regions.len());
+
+        // Allocate each region's tree and make the list entry point to it
+        for (list_entry, region) in region_list.iter_mut().zip(regions) {
+            let num_words = TreeAlloc::calc_words(region.1).expect("Region size too large");
+            let tree = bump.alloc_slice::<AtomicWord>(num_words);
+
+            // Initialize the tree
+            // Safety: The tree created by `alloc_slice()` will be valid and correctly aligned, and 0 is a
+            // valid value for `AtomicWord`
+            unsafe {
+                core::ptr::write_bytes(tree.as_mut_ptr(), 0, num_words);
+            }
+
+            // Region should be aligned to page boundary
+            assert_eq!(region.0 % PAGE_SIZE, 0);
+            assert_eq!(region.1 % PAGE_SIZE, 0);
+
+            list_entry.base_page = region.0 / PAGE_SIZE;
+            list_entry.max_page = (region.0 + region.1) / PAGE_SIZE;
+            list_entry.tree = TreeAlloc(tree);
+        }
+
+        Self { regions: region_list }
+    }
+
+    pub fn alloc(&self) -> Option<PageNum> {
+        self.regions.iter().find_map(Region::alloc)
+    }
+}
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "No need to be so rigid in tests")]
@@ -193,6 +259,7 @@ mod tests {
 
     #[test]
     #[cfg(not(loom))]
+    #[cfg_attr(miri, ignore)]
     fn test_tree_geometry_fns() {
         // Creates a sample tree with given height
         // This creates a tree as a vec of vecs
@@ -246,6 +313,7 @@ mod tests {
 
     #[test]
     #[cfg(not(loom))]
+    #[cfg_attr(miri, ignore)]
     fn test_tree_layer_fn() {
         // Creates a sample tree with given height
         // This creates a tree as a flat vec
@@ -284,6 +352,7 @@ mod tests {
 
     #[test]
     #[cfg(not(loom))]
+    #[cfg_attr(miri, ignore)]
     fn test_round_up_to_power() {
         assert_eq!(TreeAlloc::round_up_to_power(10, 5), 25);
         assert_eq!(TreeAlloc::round_up_to_power(50, 4), 64);
@@ -294,33 +363,29 @@ mod tests {
 
     #[test]
     #[cfg(not(loom))]
-    fn test_tree_calc_size() {
+    #[cfg_attr(miri, ignore)]
+    fn test_tree_calc_words() {
         // Test case 1
         // We have a region of 20 pages, since ATOMIC_WORD_BITS = 64, this will need a tree with a single word
-        assert_eq!(TreeAlloc::calc_size_for(20 * PAGE_SIZE), Some(core::mem::size_of::<AtomicWord>()));
+        assert_eq!(TreeAlloc::calc_words(20 * PAGE_SIZE), Some(1));
 
         // Test case 2
         // We have a region of 70 pages, since ATOMIC_WORD_BITS = 64, this will need 2 leaf words, which will then be rounded up
         // to a power of 64, and the tree will have 64 leaf words and 1 root word (height = 2)
-        assert_eq!(
-            TreeAlloc::calc_size_for(70 * PAGE_SIZE),
-            Some((64 + 1) * core::mem::size_of::<AtomicWord>())
-        );
+        assert_eq!(TreeAlloc::calc_words(70 * PAGE_SIZE), Some(64 + 1));
 
         // Test case 3
         // We have a region of 5000 pages, since ATOMIC_WORD_BITS = 64, this will need 79 leaf words, which will then be rounded up
         // to a power of 64, and the tree will have 4096 leaf words, 64 middle words and 1 root word (height = 3, total 4161 words)
-        assert_eq!(
-            TreeAlloc::calc_size_for(5000 * PAGE_SIZE),
-            Some((4096 + 64 + 1) * core::mem::size_of::<AtomicWord>())
-        );
+        assert_eq!(TreeAlloc::calc_words(5000 * PAGE_SIZE), Some(4096 + 64 + 1));
     }
 
     #[test]
     #[cfg(not(loom))]
+    #[cfg_attr(miri, ignore)]
     fn test_tree_height_1() {
         // Lets assume we have a region of 64 pages, since ATOMIC_WORD_BITS = 64, this will need a tree of a single word
-        assert_eq!(TreeAlloc::calc_size_for(64 * PAGE_SIZE), Some(core::mem::size_of::<AtomicWord>()));
+        assert_eq!(TreeAlloc::calc_words(64 * PAGE_SIZE), Some(1));
 
         let tree = [AtomicWord::new(0); 1];
         let tree_alloc = TreeAlloc(&tree);
@@ -363,9 +428,10 @@ mod tests {
 
     #[test]
     #[cfg(not(loom))]
+    #[cfg_attr(miri, ignore)]
     fn test_tree_height_2() {
         // Lets assume we have a region of 4096 pages, since ATOMIC_WORD_BITS = 64, this will need a tree of a 65 words (height = 2)
-        assert_eq!(TreeAlloc::calc_size_for(4096 * PAGE_SIZE), Some(65 * core::mem::size_of::<AtomicWord>()));
+        assert_eq!(TreeAlloc::calc_words(4096 * PAGE_SIZE), Some(65));
 
         let tree: [AtomicWord; 65] = std::array::from_fn(|_| AtomicWord::new(0));
         let tree_alloc = TreeAlloc(&tree);
@@ -450,6 +516,7 @@ mod tests {
 
     #[test]
     #[cfg(not(loom))]
+    #[cfg_attr(miri, ignore)]
     fn test_tree_all_heights() {
         // Creates a sample tree with given height
         let create_tree = |height| {
@@ -520,7 +587,7 @@ mod tests {
         use std::sync::Arc;
 
         // Lets assume we have a region of 64 pages, since ATOMIC_WORD_BITS = 64, this will need a tree of a single word
-        assert_eq!(TreeAlloc::calc_size_for(64 * PAGE_SIZE), Some(core::mem::size_of::<AtomicWord>()));
+        assert_eq!(TreeAlloc::calc_size_for(64 * PAGE_SIZE), Some(1));
 
         loom::model(|| {
             let tree = Arc::new([AtomicWord::new(0); 1]);
@@ -576,7 +643,7 @@ mod tests {
         use std::sync::Arc;
 
         // Lets assume we have a region of 4096 pages, since ATOMIC_WORD_BITS = 64, this will need a tree of a 65 words (height = 2)
-        assert_eq!(TreeAlloc::calc_size_for(4096 * PAGE_SIZE), Some(65 * core::mem::size_of::<AtomicWord>()));
+        assert_eq!(TreeAlloc::calc_size_for(4096 * PAGE_SIZE), Some(65));
 
         loom::model(|| {
             let tree: Arc<[AtomicWord; 65]> = Arc::new(std::array::from_fn(|_| AtomicWord::new(0)));
@@ -636,7 +703,7 @@ mod tests {
         // Lets assume we have a region of 262,144 pages, since ATOMIC_WORD_BITS = 64, this will need a tree of a 4161 words (height = 3)
         assert_eq!(
             TreeAlloc::calc_size_for(262_144 * PAGE_SIZE),
-            Some(4161 * core::mem::size_of::<AtomicWord>())
+            Some(4161)
         );
 
         loom::model(|| {
@@ -689,4 +756,59 @@ mod tests {
             assert_eq!(tree[65].load(Ordering::Acquire), !0b111);
         });
     }*/
+
+    #[test]
+    #[cfg(not(loom))]
+    fn test_page_alloc_1() {
+        // Lets say we have 1 usable memory region with 1 page
+        let regions = [(0, PAGE_SIZE)];
+
+        // Buffer where the page alloc will be set up
+        let mut buf = vec![0u8; 1000];
+
+        // Do init step 1
+        let mut bump = BumpAlloc::new(&mut buf);
+        PageAlloc::init_mock(&mut bump, regions.iter().copied());
+
+        // In the actual kernel we would now map in required memory for all the kernel structures
+
+        // Do init step 2
+        let mut bump = BumpAlloc::new(&mut buf);
+        let page_alloc = PageAlloc::init(&mut bump, regions.iter().copied());
+
+        // We should be able to allocate one page only
+        assert_eq!(page_alloc.alloc(), Some(0));
+        assert_eq!(page_alloc.alloc(), None);
+        assert_eq!(page_alloc.alloc(), None);
+        assert_eq!(page_alloc.alloc(), None);
+    }
+
+    #[test]
+    #[cfg(not(loom))]
+    fn test_page_alloc_2() {
+        // Lets say we have 3 usable memory regions with 6 pages total
+        let regions = [(0, PAGE_SIZE), (PAGE_SIZE, 2 * PAGE_SIZE), (20 * PAGE_SIZE, 3 * PAGE_SIZE)];
+
+        // Buffer where the page alloc will be set up
+        let mut buf = vec![0u8; 1000];
+
+        // Do init step 1
+        let mut bump = BumpAlloc::new(&mut buf);
+        PageAlloc::init_mock(&mut bump, regions.iter().copied());
+
+        // In the actual kernel we would now map in required memory for all the kernel structures
+
+        // Do init step 2
+        let mut bump = BumpAlloc::new(&mut buf);
+        let page_alloc = PageAlloc::init(&mut bump, regions.iter().copied());
+
+        // We should be able to allocate 6 pages only
+        for _ in 0..6 {
+            assert!(page_alloc.alloc().is_some());
+        }
+
+        assert_eq!(page_alloc.alloc(), None);
+        assert_eq!(page_alloc.alloc(), None);
+        assert_eq!(page_alloc.alloc(), None);
+    }
 }
