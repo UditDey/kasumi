@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 limine = "0.2.0"
-x86_64 = "0.15.1"
+x86_64 = "0.14"
 raw-cpuid = "11.0.1"
 spinning_top = "0.3.0"
 acpi = { version = "5.0.0", default-features = false }

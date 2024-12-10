@@ -55,6 +55,11 @@ SECTIONS
     .bss : {
         *(.bss .bss.*)
         *(COMMON)
+
+        . = ALIGN(0x200000);
+        BOOTSTRAP_HEAP_CHUNK_START = .;
+        . += 0x200000;
+        BOOTSTRAP_HEAP_CHUNK_END = .;
     } :data
 
     /* Discard .note.* and .eh_frame since they may cause issues on some hosts. */

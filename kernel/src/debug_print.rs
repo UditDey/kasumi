@@ -3,8 +3,8 @@ use spinning_top::Spinlock;
 
 use crate::FRAMEBUFFER_REQUEST;
 
-pub const HEADING_PREFIX: &str = "[kernel] ";
-pub const SUBHEADING_PREFIX: &str = "       - ";
+pub const HEADING: &str = "[kernel] ";
+pub const SUBHEADING: &str = "       - ";
 
 include!(concat!(env!("OUT_DIR"), "/console_font.rs"));
 
@@ -31,7 +31,10 @@ impl DebugPrinter {
         // Find the first framebuffer that matches our condition
         // If theres no response or suitable framebuffer we just return `None` and
         // debug printing won't happen
-        let framebuf = FRAMEBUFFER_REQUEST.get_response()?.framebuffers().find(framebuf_filter)?;
+        let framebuf = FRAMEBUFFER_REQUEST
+            .get_response()?
+            .framebuffers()
+            .find(framebuf_filter)?;
 
         // We have to make a copy of all data limine gives us since it all lives
         // in bootloader reclaimable memory, which means once we do reclaim it,
@@ -97,7 +100,9 @@ impl DebugPrinter {
                 let y_offset = self.cursor_y * CHAR_HEIGHT;
 
                 // Glyph coverage bitmap for this character
-                let glyph = GLYPHS.get(c as usize - '!' as usize).expect("Character outside of ASCII range");
+                let glyph = GLYPHS
+                    .get(c as usize - '!' as usize)
+                    .expect("Character outside of ASCII range");
 
                 // Draw the character
                 for y in 0..CHAR_HEIGHT {

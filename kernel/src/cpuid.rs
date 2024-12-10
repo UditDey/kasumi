@@ -2,18 +2,18 @@ use raw_cpuid::CpuId;
 
 use crate::{
     debug_print,
-    debug_print::{HEADING_PREFIX, SUBHEADING_PREFIX},
+    debug_print::{HEADING, SUBHEADING},
     debug_println,
 };
 
 /// Checks for required CPU features
 pub fn check() {
-    debug_println!(HEADING_PREFIX; "Checking CPU features:");
+    debug_println!(HEADING; "Checking CPU features:");
 
     let cpuid = CpuId::new();
 
     // Print vendor
-    debug_print!(SUBHEADING_PREFIX; "CPU Vendor: ");
+    debug_print!(SUBHEADING; "CPU Vendor: ");
 
     let vendor_info = cpuid.get_vendor_info();
 
@@ -23,15 +23,21 @@ pub fn check() {
     }
 
     // Get feature support
-    let feature_info = cpuid.get_feature_info().expect("Couldn't get CPUID feature info");
+    let feature_info = cpuid
+        .get_feature_info()
+        .expect("Couldn't get CPUID feature info");
 
-    let ext_info = cpuid.get_extended_feature_info().expect("Couldn't get CPUID extended feature info");
+    let ext_info = cpuid
+        .get_extended_feature_info()
+        .expect("Couldn't get CPUID extended feature info");
 
     let ext_ident = cpuid
         .get_extended_processor_and_feature_identifiers()
         .expect("Couldn't get CPUID extended processor and feature info");
 
-    let power_info = cpuid.get_thermal_power_info().expect("Couldn't get CPUID thermal and power info");
+    let power_info = cpuid
+        .get_thermal_power_info()
+        .expect("Couldn't get CPUID thermal and power info");
 
     // Check if x86_64 microarchitecture level 3 is supported
     //
@@ -53,5 +59,5 @@ pub fn check() {
     assert!(power_info.has_arat(), "CPU does not support Always-Running-APIC-Timer (ARAT)");
     assert!(ext_ident.has_1gib_pages(), "CPU does not support 1 GiB huge pages");
 
-    debug_println!(SUBHEADING_PREFIX; "All required features supported");
+    debug_println!(SUBHEADING; "All required features supported");
 }

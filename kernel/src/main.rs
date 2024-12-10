@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
-#![feature(integer_atomics)]
-#![feature(atomic_from_mut)]
+#![feature(const_alloc_layout)]
+#![feature(slice_as_array)]
 // Enable all lint groups except restriction
 #![deny(
     clippy::all,
@@ -38,22 +38,24 @@
     clippy::pattern_type_mismatch,
     reason = "This lint cannot always be satisfied when matching struct-like enum variants"
 )]
+#![allow(clippy::module_name_repetitions, reason = "Module name repetition is fine actually")]
 
 mod cpuid;
 mod debug_print;
+mod kv_map;
 mod mem;
 
 use core::fmt::Write;
 use core::panic::PanicInfo;
 
 use limine::{
-    request::{FramebufferRequest, HhdmRequest, MemoryMapRequest},
+    request::{FramebufferRequest, HhdmRequest, KernelAddressRequest, MemoryMapRequest},
     BaseRevision,
 };
 
 use x86_64::instructions::{hlt, interrupts::disable as disable_interrupts, interrupts::enable as enable_interrupts};
 
-use debug_print::HEADING_PREFIX;
+use debug_print::HEADING;
 
 // Limine bootloader requests
 //
@@ -78,20 +80,9 @@ extern "C" fn _start() -> ! {
     // Make sure limine supports our required base revision
     assert!(BASE_REVISION.is_supported());
 
-    /*/ Get the base address of the higher-half direct map (HHDM)
-    //
-    // Limine will map the first 4 GiB to somewhere within the higher-half
-    // so the kernel can access memory outside itself. We use the HHDM to
-    // access the framebuffer, ACPI structures, MMIO, etc. We later expand
-    // the HHDM to cover all physical memory but the offset remains the same
-    let _hhdm_offset = HHDM_REQUEST
-        .get_response()
-        .expect("Bootloader did not give us an HHDM response")
-        .offset();*/
-
     // Start setting everything up
     debug_print::init();
-    debug_println!(HEADING_PREFIX; "Kernel started");
+    debug_println!(HEADING; "Kernel started");
 
     cpuid::check();
     mem::init();
