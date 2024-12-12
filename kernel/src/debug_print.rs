@@ -20,7 +20,7 @@ struct DebugPrinter {
     cursor_y: u64,
 }
 
-// SAFETY: framebuf_addr is just a simple raw pointer and can be used by all threads
+// Safety: framebuf_addr is just a simple raw pointer and can be used by all threads
 unsafe impl Send for DebugPrinter {}
 
 impl DebugPrinter {
@@ -146,7 +146,7 @@ impl DebugPrinter {
         let color =
             (u32::from(r) << self.framebuf_red_shift) | (u32::from(g) << self.framebuf_green_shift) | (u32::from(b) << self.framebuf_blue_shift);
 
-        // SAFETY: This offset pointer is guaranteed to be within the framebuffer bounds
+        // Safety: This offset pointer is guaranteed to be within the framebuffer bounds
         // because x/y are within the width/height range and we trust that limine has
         // given us correct framebuffer info overall
         let ptr = unsafe { self.framebuf_addr.add(offset) };
@@ -154,7 +154,7 @@ impl DebugPrinter {
         #[allow(clippy::cast_ptr_alignment, reason = "ptr was tested to have u32 alignment in `new()`")]
         let ptr = ptr.cast::<u32>();
 
-        // SAFETY: ptr is a valid pointer within the framebuffer
+        // Safety: ptr is a valid pointer within the framebuffer
         unsafe {
             ptr.write_volatile(color);
         }
@@ -181,7 +181,7 @@ impl DebugPrinter {
             #[allow(clippy::cast_possible_truncation, reason = "usize and u64 have same size here")]
             let offset = (y * self.framebuf_pitch) as usize;
 
-            // SAFETY: This offset pointer is guaranteed to be within the framebuffer bounds
+            // Safety: This offset pointer is guaranteed to be within the framebuffer bounds
             // because `y` is in the height range
             let ptr = unsafe { self.framebuf_addr.add(offset) };
 
@@ -189,7 +189,7 @@ impl DebugPrinter {
             #[allow(clippy::cast_possible_truncation, reason = "usize and u64 have same size here")]
             let len = self.framebuf_width as usize * 4;
 
-            // SAFETY: `ptr` is a valid pointer to the start of a line with length `len`
+            // Safety: `ptr` is a valid pointer to the start of a line with length `len`
             unsafe { core::slice::from_raw_parts_mut(ptr, len) }
         };
 

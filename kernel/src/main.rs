@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 #![feature(const_alloc_layout)]
-#![feature(slice_as_array)]
 // Enable all lint groups except restriction
 #![deny(
     clippy::all,
@@ -40,20 +39,22 @@
 )]
 #![allow(clippy::module_name_repetitions, reason = "Module name repetition is fine actually")]
 
+mod arena;
 mod cpuid;
 mod debug_print;
+mod heap;
 mod kv_map;
-mod mem;
+mod page_alloc;
 
 use core::fmt::Write;
 use core::panic::PanicInfo;
 
 use limine::{
-    request::{FramebufferRequest, HhdmRequest, KernelAddressRequest, MemoryMapRequest},
+    request::{FramebufferRequest, HhdmRequest, MemoryMapRequest},
     BaseRevision,
 };
 
-use x86_64::instructions::{hlt, interrupts::disable as disable_interrupts, interrupts::enable as enable_interrupts};
+use x86_64::instructions::{hlt, interrupts::disable as disable_interrupts};
 
 use debug_print::HEADING;
 
@@ -85,7 +86,18 @@ extern "C" fn _start() -> ! {
     debug_println!(HEADING; "Kernel started");
 
     cpuid::check();
-    mem::init();
+    heap::init();
+
+    let mut arena = arena::Arena::<u64>::new();
+
+    let a = arena.alloc(69);
+    let b = arena.alloc(420);
+    arena.free(a);
+    let c = arena.alloc(360);
+
+    debug_println!("{:?}", a);
+    debug_println!("{:?}", b);
+    debug_println!("{:?}", c);
 
     loop {
         hlt();
