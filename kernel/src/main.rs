@@ -1,6 +1,5 @@
 #![no_std]
 #![no_main]
-#![feature(const_alloc_layout)]
 // Enable all lint groups except restriction
 #![deny(
     clippy::all,
@@ -43,7 +42,7 @@ mod arena;
 mod cpuid;
 mod debug_print;
 mod heap;
-mod kv_map;
+mod map;
 mod page_alloc;
 
 use core::fmt::Write;
@@ -54,6 +53,7 @@ use limine::{
     BaseRevision,
 };
 
+use map::Map;
 use x86_64::instructions::{hlt, interrupts::disable as disable_interrupts};
 
 use debug_print::HEADING;
@@ -88,16 +88,16 @@ extern "C" fn _start() -> ! {
     cpuid::check();
     heap::init();
 
-    let mut arena = arena::Arena::<u64>::new();
+    let mut map: Map<u64> = map::Map::new();
+    let n = 26;
 
-    let a = arena.alloc(69);
-    let b = arena.alloc(420);
-    arena.free(a);
-    let c = arena.alloc(360);
+    for i in 1..=n {
+        map.insert(i, i);
+    }
 
-    debug_println!("{:?}", a);
-    debug_println!("{:?}", b);
-    debug_println!("{:?}", c);
+    for i in 1..=(n + 1) {
+        debug_println!("{:?}", map.get(i));
+    }
 
     loop {
         hlt();

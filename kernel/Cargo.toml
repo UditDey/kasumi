@@ -8,6 +8,7 @@ limine = "0.2.0"
 x86_64 = "0.14"
 raw-cpuid = "11.0.1"
 spinning_top = "0.3.0"
+arrayvec = { version = "0.7.6", default-features = false }
 acpi = { version = "5.0.0", default-features = false }
 xmas-elf = "0.9.1"
 

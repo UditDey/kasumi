@@ -229,8 +229,8 @@ pub unsafe fn update_slot_metadata(ptr: NonNull<u8>, f: impl Fn(&mut (u64, u64))
     let array_ptr = chunk_hdr.byte_add(array_offset).cast::<(u64, u64)>();
     let mut metadata_ptr = array_ptr.add(slot_idx);
 
-    let metadata = unsafe { metadata_ptr.as_mut() };
-    f(metadata)
+    let metadata = metadata_ptr.as_mut();
+    f(metadata);
 }
 
 unsafe fn update_chunk_num_alloc_slots(ptr: NonNull<u8>, f: impl Fn(&mut usize)) {
@@ -240,7 +240,7 @@ unsafe fn update_chunk_num_alloc_slots(ptr: NonNull<u8>, f: impl Fn(&mut usize))
     let mut num_allocs_ptr = chunk_hdr.byte_add(offset).cast::<usize>();
     assert!(num_allocs_ptr.is_aligned());
 
-    let num_allocs = unsafe { num_allocs_ptr.as_mut() };
+    let num_allocs = num_allocs_ptr.as_mut();
     f(num_allocs);
 }
 

@@ -1,19 +1,22 @@
 use core::alloc::Layout;
+use core::mem::ManuallyDrop;
 use core::ptr::NonNull;
 
 use crate::heap::{self, SLOT_ALIGN, SLOT_SIZE};
 
-union Node<T: Copy> {
-    data: T,
+union Node<T> {
+    data: ManuallyDrop<T>,
     next_free: Option<NonNull<Self>>,
 }
 
-pub struct Arena<T: Copy> {
+pub struct Arena<T> {
     freelist: Option<NonNull<Node<T>>>,
     slot_list: NonNull<u8>,
 }
 
-impl<T: Copy> Arena<T> {
+impl<T> Arena<T> {
+    pub const _DROP_CHECK: () = assert!(!core::mem::needs_drop::<T>());
+
     pub const NODES_PER_SLOT: usize = SLOT_SIZE / core::mem::size_of::<Node<T>>();
 
     const _ALIGN_CHECK: () = {
@@ -37,7 +40,7 @@ impl<T: Copy> Arena<T> {
         }
     }
 
-    pub fn alloc(&mut self, val: T) -> NonNull<T> {
+    pub fn alloc(&mut self, value: T) -> NonNull<T> {
         // If freelist is `None` it means we have no free nodes left
         let Some(mut free_node_ptr) = self.freelist else {
             todo!("Allocate additional slot")
@@ -53,7 +56,7 @@ impl<T: Copy> Arena<T> {
 
         // Safety: If a node is present in the freelist, it means it is of the `next_free` variant
         self.freelist = unsafe { free_node.next_free };
-        free_node.data = val;
+        free_node.data = ManuallyDrop::new(value);
 
         free_node_ptr.cast::<T>()
     }
@@ -102,11 +105,5 @@ impl<T: Copy> Arena<T> {
         let freelist_head = core::ptr::addr_of_mut!(nodes[0]);
 
         NonNull::new(freelist_head).expect("freelist_head ptr is null")
-    }
-}
-
-impl<T: Copy> Drop for Arena<T> {
-    fn drop(&mut self) {
-        todo!()
     }
 }
