@@ -32,6 +32,11 @@ struct SplitInfo<V> {
     new_node: NodePtr<V>,
 }
 
+struct RemovalInfo<V> {
+    removed_value: V,
+    underflow: bool,
+}
+
 /// An ordered key-value map with `u64` keys, implemented using a B tree
 pub struct Map<V> {
     node_arena: Arena<Node<V>>,
@@ -283,6 +288,104 @@ impl<V> Map<V> {
                     promoted_key,
                     promoted_value,
                     new_node,
+                }
+            }
+        }
+    }
+
+    pub fn remove(&mut self, key: u64) -> Option<V> {
+        let removal_info = self.remove_recursive(self.root, key);
+        todo!()
+    }
+
+    fn remove_recursive(&mut self, mut node: NodePtr<V>, key: u64) -> Option<RemovalInfo<V>> {
+        let node = unsafe { node.as_mut() };
+
+        match node.keys.binary_search(&key) {
+            // Key found in current node
+            Ok(idx) => {
+                match node.children {
+                    // This is an internal node, remove key and replace with predecessor or successor
+                    Some(mut children) => {
+                        let children = unsafe { children.as_mut() };
+
+                        // The 2 children of this key, left child contains keys preceding this, right contains keys succeeding this
+                        let left_child = unsafe { children[idx].as_mut() };
+                        let right_child = unsafe { children[idx + 1].as_mut() };
+
+                        if left_child.keys.len() > ORDER / 2 {
+                            // Remove rightmost key from left child (ie the predecessor)
+                            let pred_idx = left_child.keys.len() - 1;
+                            let pred_key = left_child.keys.remove(pred_idx);
+                            let pred_value = left_child.values.remove(pred_idx);
+
+                            let removed_value = core::mem::replace(&mut node.values[idx], pred_value);
+                            node.keys[idx] = pred_key;
+
+                            return Some(RemovalInfo {
+                                removed_value,
+                                underflow: false,
+                            });
+                        }
+
+                        if right_child.keys.len() > ORDER / 2 {
+                            // Remove leftmost key from right child (ie the successor)
+                            let succ_key = right_child.keys.remove(0);
+                            let succ_value = right_child.values.remove(0);
+
+                            // Replace current key/value with successor
+                            let removed_value = core::mem::replace(&mut node.values[idx], succ_value);
+                            node.keys[idx] = succ_key;
+
+                            Some(RemovalInfo {
+                                removed_value,
+                                underflow: false,
+                            })
+                        } else {
+                            // Right and left children both have few elements and will underflow
+                            // Merge right child into left and delete right child
+                            let removed_value = node.values.remove(idx);
+                            node.keys.remove(idx);
+                            todo!()
+                        }
+                    }
+
+                    // This is a leaf node, remove the key and check for underflow
+                    None => {
+                        let value = node.values.remove(idx);
+                        node.keys.remove(idx);
+
+                        Some(RemovalInfo {
+                            removed_value: value,
+                            underflow: node.keys.len() < ORDER / 2,
+                        })
+                    }
+                }
+            }
+
+            // Key not found in current node
+            Err(idx) => {
+                match node.children {
+                    // This is an internal node, recurse down to a child node
+                    Some(mut children) => {
+                        let children = unsafe { children.as_mut() };
+
+                        let child = children.get_mut(idx).expect("Child node not found");
+                        let removal_info = self.remove_recursive(*child, key);
+
+                        // Check if value was removed from child
+                        if let Some(info) = removal_info {
+                            if info.underflow {
+                                self.rebalance_after_removal(children, idx);
+                            }
+                            Some(info)
+                        } else {
+                            None
+                        }
+                    }
+
+                    // This is a leaf node, key not present in tree
+                    None => None,
                 }
             }
         }
