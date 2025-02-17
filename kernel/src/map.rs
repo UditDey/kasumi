@@ -32,17 +32,15 @@ struct SplitInfo<V> {
     new_node: NodePtr<V>,
 }
 
-struct RemovalInfo<V> {
-    removed_value: V,
-    underflow: bool,
-}
-
 /// An ordered key-value map with `u64` keys, implemented using a B tree
 pub struct Map<V> {
     node_arena: Arena<Node<V>>,
     children_arena: Arena<Children<V>>,
     root: NodePtr<V>,
 }
+
+/// Safety: If V: Send then the whole map can be sent between threads too
+unsafe impl<V: Send> Send for Map<V> {}
 
 impl<V> Map<V> {
     pub fn new() -> Self {
@@ -113,6 +111,51 @@ impl<V> Map<V> {
                         // This is a leaf node, key is not present in the tree
                         None => return None,
                     }
+                }
+            }
+        }
+    }
+
+    /// TODO: Un-LLM-ify this
+    pub fn get_nearest(&self, key: u64) -> Option<(u64, &V)> {
+        let mut node = &self.root;
+        let mut nearest: Option<(u64, &V)> = None;
+
+        loop {
+            let n = unsafe { node.as_ref() };
+            let idx = n.keys.binary_search(&key).unwrap_or_else(|i| i);
+
+            if idx > 0 {
+                // There is a key less than or equal to the target key in this node
+                let nearest_idx = idx - 1;
+                let current_nearest = (n.keys[nearest_idx], &n.values[nearest_idx]);
+
+                nearest = match nearest {
+                    Some((nearest_key, _)) => {
+                        if current_nearest.0 > nearest_key {
+                            Some(current_nearest)
+                        } else {
+                            Some((nearest_key, nearest.unwrap().1))
+                        }
+                    }
+                    None => Some(current_nearest),
+                };
+            }
+
+            match n.children {
+                Some(children) => {
+                    let children = unsafe { children.as_ref() };
+                    // Go to the child that is less than the key
+                    if idx < children.len() {
+                        node = children.get(idx).expect("Child node not found");
+                    } else {
+                        // Key is greater than all keys in this node, go to the last child
+                        node = children.last().expect("Child node not found");
+                    }
+                }
+                None => {
+                    // Leaf node, return the nearest key found so far
+                    return nearest;
                 }
             }
         }
@@ -293,101 +336,95 @@ impl<V> Map<V> {
         }
     }
 
+    /// TODO: Un-LLM-ify the remove impl
     pub fn remove(&mut self, key: u64) -> Option<V> {
-        let removal_info = self.remove_recursive(self.root, key);
-        todo!()
+        self.remove_recursive(self.root, key)
     }
 
-    fn remove_recursive(&mut self, mut node: NodePtr<V>, key: u64) -> Option<RemovalInfo<V>> {
+    fn remove_recursive(&mut self, mut node: NodePtr<V>, key: u64) -> Option<V> {
         let node = unsafe { node.as_mut() };
 
         match node.keys.binary_search(&key) {
-            // Key found in current node
             Ok(idx) => {
-                match node.children {
-                    // This is an internal node, remove key and replace with predecessor or successor
-                    Some(mut children) => {
-                        let children = unsafe { children.as_mut() };
+                // Key found
+                if node.children.is_none() {
+                    // Leaf node
+                    node.keys.remove(idx);
+                    let value = node.values.remove(idx);
+                    Some(value)
+                } else {
+                    // Internal node
+                    // Find the inorder predecessor (largest key in the left subtree)
+                    let children = unsafe { node.children.as_mut().expect("Children should exist").as_mut() };
+                    let mut predecessor_node = *children.get(idx).expect("Child should exist");
+                    let mut predecessor_node_mut = unsafe { predecessor_node.as_mut() };
 
-                        // The 2 children of this key, left child contains keys preceding this, right contains keys succeeding this
-                        let left_child = unsafe { children[idx].as_mut() };
-                        let right_child = unsafe { children[idx + 1].as_mut() };
-
-                        if left_child.keys.len() > ORDER / 2 {
-                            // Remove rightmost key from left child (ie the predecessor)
-                            let pred_idx = left_child.keys.len() - 1;
-                            let pred_key = left_child.keys.remove(pred_idx);
-                            let pred_value = left_child.values.remove(pred_idx);
-
-                            let removed_value = core::mem::replace(&mut node.values[idx], pred_value);
-                            node.keys[idx] = pred_key;
-
-                            return Some(RemovalInfo {
-                                removed_value,
-                                underflow: false,
-                            });
-                        }
-
-                        if right_child.keys.len() > ORDER / 2 {
-                            // Remove leftmost key from right child (ie the successor)
-                            let succ_key = right_child.keys.remove(0);
-                            let succ_value = right_child.values.remove(0);
-
-                            // Replace current key/value with successor
-                            let removed_value = core::mem::replace(&mut node.values[idx], succ_value);
-                            node.keys[idx] = succ_key;
-
-                            Some(RemovalInfo {
-                                removed_value,
-                                underflow: false,
-                            })
-                        } else {
-                            // Right and left children both have few elements and will underflow
-                            // Merge right child into left and delete right child
-                            let removed_value = node.values.remove(idx);
-                            node.keys.remove(idx);
-                            todo!()
-                        }
+                    while let Some(mut pred_children) = predecessor_node_mut.children {
+                        let pred_children_mut = unsafe { pred_children.as_mut() };
+                        predecessor_node = *pred_children_mut
+                            .last()
+                            .expect("Predecessor should have children");
+                        predecessor_node_mut = unsafe { predecessor_node.as_mut() };
                     }
 
-                    // This is a leaf node, remove the key and check for underflow
-                    None => {
-                        let value = node.values.remove(idx);
-                        node.keys.remove(idx);
+                    // Replace the key and value to be deleted with the predecessor
+                    let predecessor_key_idx = predecessor_node_mut.keys.len() - 1;
+                    let predecessor_key = predecessor_node_mut.keys.remove(predecessor_key_idx);
+                    let predecessor_value = predecessor_node_mut.values.remove(predecessor_key_idx);
 
-                        Some(RemovalInfo {
-                            removed_value: value,
-                            underflow: node.keys.len() < ORDER / 2,
-                        })
-                    }
+                    let original_value = core::mem::replace(&mut node.values[idx], predecessor_value);
+                    node.keys[idx] = predecessor_key;
+
+                    // Recursively remove the predecessor from its original leaf node
+                    self.remove_recursive(predecessor_node, predecessor_key)
+                        .map(|_| original_value)
                 }
             }
-
-            // Key not found in current node
             Err(idx) => {
+                // Key not found
                 match node.children {
-                    // This is an internal node, recurse down to a child node
                     Some(mut children) => {
+                        // Internal node, recurse down to the appropriate child
                         let children = unsafe { children.as_mut() };
-
-                        let child = children.get_mut(idx).expect("Child node not found");
-                        let removal_info = self.remove_recursive(*child, key);
-
-                        // Check if value was removed from child
-                        if let Some(info) = removal_info {
-                            if info.underflow {
-                                self.rebalance_after_removal(children, idx);
-                            }
-                            Some(info)
-                        } else {
-                            None
-                        }
+                        let child = children.get_mut(idx).expect("Child not found");
+                        self.remove_recursive(*child, key)
                     }
-
-                    // This is a leaf node, key not present in tree
-                    None => None,
+                    None => {
+                        // Leaf node, key does not exist
+                        None
+                    }
                 }
             }
         }
+    }
+}
+
+use core::fmt::{self, Debug};
+
+/// TODO: Un-LLM-ify the debug impl
+impl<V: Debug> Debug for Map<V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut map_debug = f.debug_map();
+        self.fmt_node(&mut map_debug, self.root)?;
+        map_debug.finish()
+    }
+}
+
+impl<V: Debug> Map<V> {
+    fn fmt_node(&self, map_debug: &mut fmt::DebugMap<'_, '_>, node_ptr: NodePtr<V>) -> fmt::Result {
+        let node = unsafe { node_ptr.as_ref() };
+
+        for i in 0..node.keys.len() {
+            map_debug.entry(&node.keys[i], &node.values[i]);
+        }
+
+        if let Some(children_ptr) = node.children {
+            let children = unsafe { children_ptr.as_ref() };
+            for child in children.iter() {
+                self.fmt_node(map_debug, *child)?;
+            }
+        }
+
+        Ok(())
     }
 }
