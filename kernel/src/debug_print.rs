@@ -1,4 +1,4 @@
-use limine::framebuffer::{Framebuffer, MemoryModel};
+use limine::framebuffer::{Framebuffer as LimineFramebuf, MemoryModel};
 use spinning_top::Spinlock;
 
 use crate::FRAMEBUFFER_REQUEST;
@@ -8,25 +8,89 @@ pub const SUBHEADING: &str = "       - ";
 
 include!(concat!(env!("OUT_DIR"), "/console_font.rs"));
 
-struct DebugPrinter {
-    framebuf_addr: *mut u8,
-    framebuf_width: u64,
-    framebuf_height: u64,
-    framebuf_pitch: u64,
-    framebuf_red_shift: u8,
-    framebuf_green_shift: u8,
-    framebuf_blue_shift: u8,
-    cursor_x: u64,
-    cursor_y: u64,
+/// Represents an RGB32 framebuffer
+struct Framebuffer {
+    addr: *mut u8,
+    width: usize,
+    height: usize,
+    pitch: usize,
+    red_shift: u8,
+    green_shift: u8,
+    blue_shift: u8,
 }
 
-// Safety: framebuf_addr is just a simple raw pointer and can be used by all threads
-unsafe impl Send for DebugPrinter {}
+// Safety: addr is just a simple raw pointer and can be used by all threads
+unsafe impl Send for Framebuffer {}
+
+impl Framebuffer {
+    #[expect(clippy::many_single_char_names)]
+    fn draw_pixel(&mut self, x: usize, y: usize, r: u8, g: u8, b: u8) {
+        // x/y should be within the framebuffer's bounds
+        assert!(x < self.width, "x out of framebuffer bounds");
+        assert!(y < self.height, "y out of framebuffer bounds");
+
+        // x * 4 because 32 bit RGB has 4 bytes per pixel
+        let offset = (x * 4) + (y * self.pitch);
+
+        let color = (u32::from(r) << self.red_shift) | (u32::from(g) << self.green_shift) | (u32::from(b) << self.blue_shift);
+
+        // Safety: This offset pointer is guaranteed to be within the framebuffer bounds
+        // because x/y are within the width/height range
+        let ptr = unsafe { self.addr.add(offset) };
+
+        unsafe {
+            ptr.cast::<u32>().write_volatile(color);
+        }
+    }
+
+    fn width_in_chars(&self) -> usize {
+        self.width / CHAR_WIDTH
+    }
+
+    fn height_in_chars(&self) -> usize {
+        self.height / CHAR_HEIGHT
+    }
+
+    fn scroll(&mut self, amount: usize) {
+        // Returns a slice representing a horizontal line at coordinate `y` in the framebuffer
+        let line = |y| {
+            assert!(y < self.height, "y out of framebuffer bounds");
+            let offset = y * self.pitch;
+
+            // Safety: This offset pointer is guaranteed to be within the framebuffer bounds
+            // because `y` is in the height range
+            let ptr = unsafe { self.addr.add(offset) };
+
+            // Length of the slice, * 4 because we have 4 bytes per pixel
+            let len = self.width * 4;
+
+            // Safety: `ptr` is a valid pointer to the start of a line with length `len`
+            unsafe { core::slice::from_raw_parts_mut(ptr, len) }
+        };
+
+        for y in 0..(self.height - amount) {
+            let src_line = line(y);
+            let dst_line = line(y + amount);
+
+            src_line.copy_from_slice(dst_line);
+        }
+
+        for y in (self.height - amount)..self.height {
+            line(y).fill(0);
+        }
+    }
+}
+
+struct DebugPrinter {
+    framebuf: Framebuffer,
+    cursor_x: usize,
+    cursor_y: usize,
+}
 
 impl DebugPrinter {
-    pub fn new() -> Option<Self> {
+    fn new() -> Option<Self> {
         // We only support 32 bit RGB framebuffers
-        let framebuf_filter = |framebuf: &Framebuffer| framebuf.memory_model() == MemoryModel::RGB && framebuf.bpp() == 32;
+        let framebuf_filter = |framebuf: &LimineFramebuf| framebuf.memory_model() == MemoryModel::RGB && framebuf.bpp() == 32;
 
         // Find the first framebuffer that matches our condition
         // If theres no response or suitable framebuffer we just return `None` and
@@ -36,30 +100,32 @@ impl DebugPrinter {
             .framebuffers()
             .find(framebuf_filter)?;
 
-        // We have to make a copy of all data limine gives us since it all lives
-        // in bootloader reclaimable memory, which means once we do reclaim it,
-        // the data may be overwritten as we may use that memory for other purposes
-        let framebuf_addr = framebuf.addr();
-        let framebuf_width = framebuf.width();
-        let framebuf_height = framebuf.height();
-        let framebuf_pitch = framebuf.pitch();
-        let framebuf_red_shift = framebuf.red_mask_shift();
-        let framebuf_green_shift = framebuf.green_mask_shift();
-        let framebuf_blue_shift = framebuf.blue_mask_shift();
+        // We have to make a copy of all data limine gives us (once bootloader memory is reclaimed it'll be lost)
+        let addr = framebuf.addr();
+        let width = framebuf.width() as usize;
+        let height = framebuf.height() as usize;
+        let pitch = framebuf.pitch() as usize;
+        let red_shift = framebuf.red_mask_shift();
+        let green_shift = framebuf.green_mask_shift();
+        let blue_shift = framebuf.blue_mask_shift();
 
         // Sanity test that framebuffer addr is u32 aligned
-        if framebuf_addr as usize % 4 != 0 {
+        if addr as usize % 4 != 0 {
             return None;
         }
 
+        let framebuf = Framebuffer {
+            addr,
+            width,
+            height,
+            pitch,
+            red_shift,
+            green_shift,
+            blue_shift,
+        };
+
         Some(Self {
-            framebuf_addr,
-            framebuf_width,
-            framebuf_height,
-            framebuf_pitch,
-            framebuf_red_shift,
-            framebuf_green_shift,
-            framebuf_blue_shift,
+            framebuf,
             cursor_x: 0,
             cursor_y: 0,
         })
@@ -70,18 +136,11 @@ impl DebugPrinter {
             // New line + carriage return
             '\n' => self.new_line(),
 
-            // Tab
-            '\t' => {
-                for _ in 0..4 {
-                    self.print_char(' ');
-                }
-            }
-
             // Space
             ' ' => {
                 // If the cursor is past the end of the screen go to new line
                 // else just move to the next column
-                if self.cursor_x == self.framebuffer_width_chars() {
+                if self.cursor_x == self.framebuf.width_in_chars() {
                     self.new_line();
                 } else {
                     self.cursor_x += 1;
@@ -91,7 +150,7 @@ impl DebugPrinter {
             // Regular character
             c => {
                 // If the cursor is past the end of the screen go to new line
-                if self.cursor_x == self.framebuffer_width_chars() {
+                if self.cursor_x == self.framebuf.width_in_chars() {
                     self.new_line();
                 }
 
@@ -101,17 +160,13 @@ impl DebugPrinter {
 
                 // Glyph coverage bitmap for this character
                 let glyph = GLYPHS
-                    .get(c as usize - '!' as usize)
+                    .get(c as usize - '!' as usize) // Glyph array starts from '!'
                     .expect("Character outside of ASCII range");
 
-                // Draw the character
-                for y in 0..CHAR_HEIGHT {
-                    for x in 0..CHAR_WIDTH {
-                        #[allow(clippy::cast_possible_truncation, reason = "usize and u64 have same size here")]
-                        #[allow(clippy::indexing_slicing, reason = "x/y will always be in CHAR_WIDTH/CHAR_HEIGHT range")]
-                        let coverage = glyph[y as usize][x as usize];
-
-                        self.draw_pixel(x_offset + x, y_offset + y, coverage, coverage, coverage);
+                for (y, row) in glyph.iter().enumerate() {
+                    for (x, pixel) in row.iter().enumerate() {
+                        self.framebuf
+                            .draw_pixel(x_offset + x, y_offset + y, *pixel, *pixel, *pixel);
                     }
                 }
 
@@ -121,90 +176,16 @@ impl DebugPrinter {
         }
     }
 
-    /// Framebuffer width in characters
-    fn framebuffer_width_chars(&self) -> u64 {
-        self.framebuf_width / CHAR_WIDTH
-    }
-
-    /// Framebuffer height in characters
-    fn framebuffer_height_chars(&self) -> u64 {
-        self.framebuf_height / CHAR_HEIGHT
-    }
-
-    #[allow(clippy::many_single_char_names, reason = "Variable meanings are obvious")]
-    fn draw_pixel(&self, x: u64, y: u64, r: u8, g: u8, b: u8) {
-        // x/y should be within the framebuffer's bounds
-        assert!(x < self.framebuf_width, "x outside of framebuffer bounds");
-        assert!(y < self.framebuf_height, "y outside of framebuffer bounds");
-
-        // x * 4 because 32 bit RGB has 4 bytes per pixel
-        let offset = (x * 4) + (y * self.framebuf_pitch);
-
-        #[allow(clippy::cast_possible_truncation, reason = "usize and u64 have same size here")]
-        let offset = offset as usize;
-
-        let color =
-            (u32::from(r) << self.framebuf_red_shift) | (u32::from(g) << self.framebuf_green_shift) | (u32::from(b) << self.framebuf_blue_shift);
-
-        // Safety: This offset pointer is guaranteed to be within the framebuffer bounds
-        // because x/y are within the width/height range and we trust that limine has
-        // given us correct framebuffer info overall
-        let ptr = unsafe { self.framebuf_addr.add(offset) };
-
-        #[allow(clippy::cast_ptr_alignment, reason = "ptr was tested to have u32 alignment in `new()`")]
-        let ptr = ptr.cast::<u32>();
-
-        // Safety: ptr is a valid pointer within the framebuffer
-        unsafe {
-            ptr.write_volatile(color);
-        }
-    }
-
     fn new_line(&mut self) {
         // If we're at the last row scroll the screen, else just go to the next row
-        if self.cursor_y == self.framebuffer_height_chars() - 1 {
-            self.scroll();
+        if self.cursor_y == self.framebuf.height_in_chars() - 1 {
+            self.framebuf.scroll(CHAR_HEIGHT);
         } else {
             self.cursor_y += 1;
         }
 
         // Go back to the start of the line as well
         self.cursor_x = 0;
-    }
-
-    /// Scrolls the screen downards by one row
-    fn scroll(&self) {
-        // Returns a slice representing a horizontal line at coordinate `y` in the framebuffer
-        let line = |y: u64| {
-            assert!(y < self.framebuf_height, "y outside of framebuffer bounds");
-
-            #[allow(clippy::cast_possible_truncation, reason = "usize and u64 have same size here")]
-            let offset = (y * self.framebuf_pitch) as usize;
-
-            // Safety: This offset pointer is guaranteed to be within the framebuffer bounds
-            // because `y` is in the height range
-            let ptr = unsafe { self.framebuf_addr.add(offset) };
-
-            // Length of the slice, * 4 because we have 4 bytes per pixel
-            #[allow(clippy::cast_possible_truncation, reason = "usize and u64 have same size here")]
-            let len = self.framebuf_width as usize * 4;
-
-            // Safety: `ptr` is a valid pointer to the start of a line with length `len`
-            unsafe { core::slice::from_raw_parts_mut(ptr, len) }
-        };
-
-        // Go over every line (excluding the last row) and copy the corresponding line in the next row into it
-        for y in 0..(self.framebuf_height - CHAR_HEIGHT) {
-            let src_line = line(y);
-            let dst_line = line(y + CHAR_HEIGHT);
-
-            src_line.copy_from_slice(dst_line);
-        }
-
-        // Go over every line in the last row and zero it
-        for y in (self.framebuf_height - CHAR_HEIGHT)..self.framebuf_height {
-            line(y).fill(0);
-        }
     }
 }
 
@@ -214,9 +195,9 @@ pub fn init() {
     *DEBUG_PRINTER.lock() = DebugPrinter::new();
 }
 
-pub struct Helper;
+pub struct DebugPrintHelper;
 
-impl core::fmt::Write for Helper {
+impl core::fmt::Write for DebugPrintHelper {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         let mut printer = DEBUG_PRINTER.lock();
 
@@ -230,8 +211,8 @@ impl core::fmt::Write for Helper {
     }
 }
 
-pub fn helper(args: core::fmt::Arguments) {
-    _ = core::fmt::write(&mut Helper, args);
+pub fn debug_print_helper(args: core::fmt::Arguments) {
+    _ = core::fmt::write(&mut DebugPrintHelper, args);
 }
 
 #[macro_export]
@@ -241,7 +222,7 @@ macro_rules! debug_print {
     };
 
     ($($arg:tt)*) => {
-        $crate::debug_print::helper(format_args!($($arg)*))
+        $crate::debug_print::debug_print_helper(format_args!($($arg)*))
     };
 }
 

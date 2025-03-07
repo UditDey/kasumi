@@ -1,8 +1,8 @@
-use std::fs;
 use std::env;
+use std::fs;
 use std::io::Write;
-use std::path::Path;
 use std::ops::RangeInclusive;
+use std::path::Path;
 
 use fontdue::{Font, FontSettings};
 
@@ -31,23 +31,24 @@ pub fn main() {
 
     writeln!(
         &out_file,
-        "pub const CHAR_WIDTH: u64 = {char_width};
-        pub const CHAR_HEIGHT: u64 = {char_height};
+        "pub const CHAR_WIDTH: usize = {char_width};
+        pub const CHAR_HEIGHT: usize = {char_height};
 
         pub type Glyph = &'static [&'static [u8; {char_width}]; {char_height}];
 
         pub const GLYPHS: &[Glyph] = &["
-    ).unwrap();
+    )
+    .unwrap();
 
     for c in CHAR_RANGE {
         let mut bitmap = vec![vec![0u8; char_width]; char_height];
 
         let (metrics, data) = font.rasterize(c, FONT_SIZE);
-        
+
         for x in 0..metrics.width as i32 {
             for y in 0..metrics.height as i32 {
                 let bitmap_x = x + metrics.xmin.max(0);
-                let bitmap_y = y + baseline_y  - metrics.height as i32 - metrics.ymin;
+                let bitmap_y = y + baseline_y - metrics.height as i32 - metrics.ymin;
 
                 let idx = x + (y * metrics.width as i32);
                 let coverage = (data[idx as usize] as f32 * BRIGHTNESS_SCALE) as u8;

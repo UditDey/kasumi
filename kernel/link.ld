@@ -57,9 +57,9 @@ SECTIONS
         *(COMMON)
 
         . = ALIGN(0x200000);
-        BOOTSTRAP_HEAP_CHUNK_START = .;
+        BOOTSTRAP_HEAP_PAGE_START = .;
         . += 0x200000;
-        BOOTSTRAP_HEAP_CHUNK_END = .;
+        BOOTSTRAP_HEAP_PAGE_END = .;
     } :data
 
     /* Discard .note.* and .eh_frame since they may cause issues on some hosts. */
