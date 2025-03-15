@@ -23,21 +23,15 @@ pub fn check() {
     }
 
     // Get feature support
-    let feature_info = cpuid
-        .get_feature_info()
-        .expect("Couldn't get CPUID feature info");
+    let feature_info = cpuid.get_feature_info().expect("Couldn't get CPUID feature info");
 
-    let ext_info = cpuid
-        .get_extended_feature_info()
-        .expect("Couldn't get CPUID extended feature info");
+    let ext_info = cpuid.get_extended_feature_info().expect("Couldn't get CPUID extended feature info");
 
     let ext_ident = cpuid
         .get_extended_processor_and_feature_identifiers()
         .expect("Couldn't get CPUID extended processor and feature info");
 
-    let power_info = cpuid
-        .get_thermal_power_info()
-        .expect("Couldn't get CPUID thermal and power info");
+    let power_info = cpuid.get_thermal_power_info().expect("Couldn't get CPUID thermal and power info");
 
     // Check if x86_64 microarchitecture level 3 is supported
     //

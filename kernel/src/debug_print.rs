@@ -95,10 +95,7 @@ impl DebugPrinter {
         // Find the first framebuffer that matches our condition
         // If theres no response or suitable framebuffer we just return `None` and
         // debug printing won't happen
-        let framebuf = FRAMEBUFFER_REQUEST
-            .get_response()?
-            .framebuffers()
-            .find(framebuf_filter)?;
+        let framebuf = FRAMEBUFFER_REQUEST.get_response()?.framebuffers().find(framebuf_filter)?;
 
         // We have to make a copy of all data limine gives us (once bootloader memory is reclaimed it'll be lost)
         let addr = framebuf.addr();
@@ -165,8 +162,7 @@ impl DebugPrinter {
 
                 for (y, row) in glyph.iter().enumerate() {
                     for (x, pixel) in row.iter().enumerate() {
-                        self.framebuf
-                            .draw_pixel(x_offset + x, y_offset + y, *pixel, *pixel, *pixel);
+                        self.framebuf.draw_pixel(x_offset + x, y_offset + y, *pixel, *pixel, *pixel);
                     }
                 }
 

@@ -29,8 +29,8 @@ unsafe impl<const S: usize> Send for ObjectPool<S> {}
 impl<const S: usize> ObjectPool<S> {
     // Static check to ensure chunk can be divided correctly
     const STATIC_CHECK: ((), ()) = (
-        assert!(SMALL_PAGE_SIZE % core::mem::size_of::<Object<S>>() == 0),
-        assert!(SMALL_PAGE_ALIGN % core::mem::align_of::<Object<S>>() == 0),
+        assert!(SMALL_PAGE_SIZE.is_multiple_of(core::mem::size_of::<Object<S>>())),
+        assert!(SMALL_PAGE_ALIGN.is_multiple_of(core::mem::align_of::<Object<S>>())),
     );
 
     pub const OBJ_ALIGNMENT: usize = core::mem::align_of::<Object<S>>();

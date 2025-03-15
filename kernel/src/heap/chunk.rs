@@ -83,7 +83,7 @@ pub(super) fn init() {
     let heap_page_end = &raw mut BOOTSTRAP_HEAP_PAGE_END;
 
     // Sanity check the bootstrap heap page size and alignment
-    assert!(heap_page_start.addr() % LARGE_PAGE_ALIGN == 0);
+    assert!(heap_page_start.addr().is_multiple_of(LARGE_PAGE_ALIGN));
     assert!(heap_page_end.addr() - heap_page_start.addr() == LARGE_PAGE_SIZE);
 
     // Initialize the `HeapPageHeader` in the bootstrap heap page
@@ -104,16 +104,10 @@ pub(super) fn init() {
         let next_chunk_idx = chunk_idx + 1;
 
         // i + 1 because first section is occupied by `HeapPageHeader`
-        let chunk_ptr = unsafe {
-            heap_page_start
-                .add((chunk_idx + 1) * SMALL_PAGE_SIZE)
-                .cast::<FreeChunkHeader>()
-        };
+        let chunk_ptr = unsafe { heap_page_start.add((chunk_idx + 1) * SMALL_PAGE_SIZE).cast::<FreeChunkHeader>() };
 
         let next_chunk_ptr = unsafe {
-            let ptr = heap_page_start
-                .add((next_chunk_idx + 1) * SMALL_PAGE_SIZE)
-                .cast::<FreeChunkHeader>();
+            let ptr = heap_page_start.add((next_chunk_idx + 1) * SMALL_PAGE_SIZE).cast::<FreeChunkHeader>();
 
             NonNull::new(ptr).expect("`next_chunk_ptr` should not be null")
         };
@@ -172,7 +166,7 @@ pub fn alloc() -> NonNull<u8> {
 
 /// Free a previously allocated chunk
 pub fn free(chunk: NonNull<u8>) {
-    assert!(chunk.addr().get() % SMALL_PAGE_ALIGN == 0); // Sanity check that the ptr indeed is a chunk addr
+    assert!(chunk.addr().get().is_multiple_of(SMALL_PAGE_ALIGN)); // Sanity check that the ptr indeed is a chunk addr
 
     let mut guard = CHUNK_ALLOC.lock();
     let alloc = guard.as_mut().expect("`init()` should have been called");
