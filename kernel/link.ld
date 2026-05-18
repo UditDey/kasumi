@@ -1,49 +1,47 @@
-/* Linker script from https://github.com/limine-bootloader/limine-rust-template/blob/trunk/kernel/linker.ld */
-
 /* Tell the linker that we want an x86_64 ELF64 output file */
 OUTPUT_FORMAT(elf64-x86-64)
-OUTPUT_ARCH(i386:x86-64)
 
-/* We want the symbol _start to be our entry point */
-ENTRY(_start)
+/* We want the symbol kmain to be our entry point */
+ENTRY(kmain)
 
 /* Define the program headers we want so the bootloader gives us the right */
-/* MMU permissions */
+/* MMU permissions; this also allows us to exert more control over the linking */
+/* process. */
 PHDRS
 {
-    text    PT_LOAD    FLAGS((1 << 0) | (1 << 2)) ; /* Execute + Read */
-    rodata  PT_LOAD    FLAGS((1 << 2)) ;            /* Read only */
-    data    PT_LOAD    FLAGS((1 << 1) | (1 << 2)) ; /* Write + Read */
-    dynamic PT_DYNAMIC FLAGS((1 << 1) | (1 << 2)) ; /* Dynamic PHDR for relocations */
+    text    PT_LOAD;
+    rodata  PT_LOAD;
+    data    PT_LOAD;
+    dynamic PT_DYNAMIC;
 }
 
 SECTIONS
 {
-    /* We wanna be placed in the topmost 2GiB of the address space, for optimisations */
+    /* We want to be placed in the topmost 2GiB of the address space, for optimisations */
     /* and because that is what the Limine spec mandates. */
     /* Any address in this region will do, but often 0xffffffff80000000 is chosen as */
     /* that is the beginning of the region. */
     . = 0xffffffff80000000;
 
+    __text_start = .;
     .text : {
         *(.text .text.*)
     } :text
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
+    __text_end = .;
 
-    /* Move to the next memory page for .rodata */
-    . += CONSTANT(MAXPAGESIZE);
-
+    __rodata_start = .;
     .rodata : {
         *(.rodata .rodata.*)
     } :rodata
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
+    __rodata_end = .;
 
-    /* Move to the next memory page for .data */
-    . += CONSTANT(MAXPAGESIZE);
-
+    __data_start = .;
     .data : {
         *(.data .data.*)
     } :data
 
-    /* Dynamic section for relocations, both in its own PHDR and inside data PHDR */
     .dynamic : {
         *(.dynamic)
     } :data :dynamic
@@ -55,16 +53,13 @@ SECTIONS
     .bss : {
         *(.bss .bss.*)
         *(COMMON)
-
-        . = ALIGN(0x200000);
-        BOOTSTRAP_HEAP_PAGE_START = .;
-        . += 0x200000;
-        BOOTSTRAP_HEAP_PAGE_END = .;
     } :data
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
+    __data_end = .;
 
-    /* Discard .note.* and .eh_frame since they may cause issues on some hosts. */
+    /* Discard .note.* and .eh_frame* since they may cause issues on some hosts. */
     /DISCARD/ : {
-        *(.eh_frame)
+        *(.eh_frame*)
         *(.note .note.*)
     }
 }

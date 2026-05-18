@@ -1,7 +1,9 @@
-use limine::framebuffer::{Framebuffer as LimineFramebuf, MemoryModel};
-use spinning_top::Spinlock;
+use limine::{
+    framebuffer::{Framebuffer as LimineFramebuf, MemoryModel},
+    response::FramebufferResponse,
+};
 
-use crate::FRAMEBUFFER_REQUEST;
+use crate::state::DEBUG_PRINTER;
 
 pub const HEADING: &str = "[kernel] ";
 pub const SUBHEADING: &str = "       - ";
@@ -19,11 +21,10 @@ struct Framebuffer {
     blue_shift: u8,
 }
 
-// Safety: addr is just a simple raw pointer and can be used by all threads
+// SAFETY: addr can be sent between threads no problem
 unsafe impl Send for Framebuffer {}
 
 impl Framebuffer {
-    #[expect(clippy::many_single_char_names)]
     fn draw_pixel(&mut self, x: usize, y: usize, r: u8, g: u8, b: u8) {
         // x/y should be within the framebuffer's bounds
         assert!(x < self.width, "x out of framebuffer bounds");
@@ -32,10 +33,10 @@ impl Framebuffer {
         // x * 4 because 32 bit RGB has 4 bytes per pixel
         let offset = (x * 4) + (y * self.pitch);
 
-        let color = (u32::from(r) << self.red_shift) | (u32::from(g) << self.green_shift) | (u32::from(b) << self.blue_shift);
+        let color = (u32::from(r) << self.red_shift)
+            | (u32::from(g) << self.green_shift)
+            | (u32::from(b) << self.blue_shift);
 
-        // Safety: This offset pointer is guaranteed to be within the framebuffer bounds
-        // because x/y are within the width/height range
         let ptr = unsafe { self.addr.add(offset) };
 
         unsafe {
@@ -56,18 +57,15 @@ impl Framebuffer {
         let line = |y| {
             assert!(y < self.height, "y out of framebuffer bounds");
             let offset = y * self.pitch;
-
-            // Safety: This offset pointer is guaranteed to be within the framebuffer bounds
-            // because `y` is in the height range
             let ptr = unsafe { self.addr.add(offset) };
 
             // Length of the slice, * 4 because we have 4 bytes per pixel
             let len = self.width * 4;
 
-            // Safety: `ptr` is a valid pointer to the start of a line with length `len`
             unsafe { core::slice::from_raw_parts_mut(ptr, len) }
         };
 
+        // Move all lines up except the last rows
         for y in 0..(self.height - amount) {
             let src_line = line(y);
             let dst_line = line(y + amount);
@@ -75,27 +73,30 @@ impl Framebuffer {
             src_line.copy_from_slice(dst_line);
         }
 
+        // Zero the last rows
         for y in (self.height - amount)..self.height {
             line(y).fill(0);
         }
     }
 }
 
-struct DebugPrinter {
+pub struct DebugPrinter {
     framebuf: Framebuffer,
     cursor_x: usize,
     cursor_y: usize,
 }
 
 impl DebugPrinter {
-    fn new() -> Option<Self> {
+    pub fn try_new(framebuf_resp: Option<&FramebufferResponse>) -> Option<Self> {
+        let framebuf_resp = framebuf_resp?;
+
         // We only support 32 bit RGB framebuffers
-        let framebuf_filter = |framebuf: &LimineFramebuf| framebuf.memory_model() == MemoryModel::RGB && framebuf.bpp() == 32;
+        let framebuf_filter = |framebuf: &LimineFramebuf| {
+            framebuf.memory_model() == MemoryModel::RGB && framebuf.bpp() == 32
+        };
 
         // Find the first framebuffer that matches our condition
-        // If theres no response or suitable framebuffer we just return `None` and
-        // debug printing won't happen
-        let framebuf = FRAMEBUFFER_REQUEST.get_response()?.framebuffers().find(framebuf_filter)?;
+        let framebuf = framebuf_resp.framebuffers().find(framebuf_filter)?;
 
         // We have to make a copy of all data limine gives us (once bootloader memory is reclaimed it'll be lost)
         let addr = framebuf.addr();
@@ -107,7 +108,7 @@ impl DebugPrinter {
         let blue_shift = framebuf.blue_mask_shift();
 
         // Sanity test that framebuffer addr is u32 aligned
-        if addr as usize % 4 != 0 {
+        if !addr.cast::<u32>().is_aligned() {
             return None;
         }
 
@@ -162,7 +163,13 @@ impl DebugPrinter {
 
                 for (y, row) in glyph.iter().enumerate() {
                     for (x, pixel) in row.iter().enumerate() {
-                        self.framebuf.draw_pixel(x_offset + x, y_offset + y, *pixel, *pixel, *pixel);
+                        self.framebuf.draw_pixel(
+                            x_offset + x,
+                            y_offset + y,
+                            *pixel,
+                            *pixel,
+                            *pixel,
+                        );
                     }
                 }
 
@@ -185,30 +192,25 @@ impl DebugPrinter {
     }
 }
 
-static DEBUG_PRINTER: Spinlock<Option<DebugPrinter>> = Spinlock::new(None);
-
-pub fn init() {
-    *DEBUG_PRINTER.lock() = DebugPrinter::new();
+pub fn init(framebuf_resp: Option<&FramebufferResponse>) {
+    *DEBUG_PRINTER.lock() = DebugPrinter::try_new(framebuf_resp);
 }
 
-pub struct DebugPrintHelper;
+pub fn debug_print_helper(printer: Option<&mut DebugPrinter>, args: core::fmt::Arguments) {
+    if let Some(printer) = printer {
+        struct LockedWriter<'a>(&'a mut DebugPrinter);
 
-impl core::fmt::Write for DebugPrintHelper {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        let mut printer = DEBUG_PRINTER.lock();
-
-        if let Some(printer) = printer.as_mut() {
-            for c in s.chars() {
-                printer.print_char(c);
+        impl core::fmt::Write for LockedWriter<'_> {
+            fn write_str(&mut self, s: &str) -> core::fmt::Result {
+                for c in s.chars() {
+                    self.0.print_char(c);
+                }
+                Ok(())
             }
         }
 
-        Ok(())
+        _ = core::fmt::write(&mut LockedWriter(printer), args);
     }
-}
-
-pub fn debug_print_helper(args: core::fmt::Arguments) {
-    _ = core::fmt::write(&mut DebugPrintHelper, args);
 }
 
 #[macro_export]
@@ -217,9 +219,10 @@ macro_rules! debug_print {
         $crate::debug_print!("{}{}", $prefix, format_args!($($arg)*));
     };
 
-    ($($arg:tt)*) => {
-        $crate::debug_print::debug_print_helper(format_args!($($arg)*))
-    };
+    ($($arg:tt)*) => {{
+        let mut printer = $crate::state::DEBUG_PRINTER.lock();
+        $crate::debug_print::debug_print_helper(printer.as_mut(), format_args!($($arg)*))
+    }};
 }
 
 #[macro_export]
@@ -234,5 +237,33 @@ macro_rules! debug_println {
 
     ($($arg:tt)*) => {
         $crate::debug_print!("{}\n", format_args!($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! forced_debug_print {
+    ($prefix:expr; $($arg:tt)*) => {
+        $crate::forced_debug_print!("{}{}", $prefix, format_args!($($arg)*));
+    };
+
+    ($($arg:tt)*) => {{
+        $crate::state::DEBUG_PRINTER.force_unlock();
+        let mut printer = $crate::state::DEBUG_PRINTER.lock();
+        $crate::debug_print::debug_print_helper(printer.as_mut(), format_args!($($arg)*))
+    }};
+}
+
+#[macro_export]
+macro_rules! forced_debug_println {
+    () => {
+        $crate::forced_debug_println!("")
+    };
+
+    ($prefix:expr; $($arg:tt)*) => {
+        $crate::forced_debug_print!("{}{}\n", $prefix, format_args!($($arg)*))
+    };
+
+    ($($arg:tt)*) => {
+        $crate::forced_debug_print!("{}\n", format_args!($($arg)*))
     };
 }

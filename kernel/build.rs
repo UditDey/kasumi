@@ -6,13 +6,16 @@ use std::path::Path;
 
 use fontdue::{Font, FontSettings};
 
+const FONT_FILE: &str = "IBMPlexMono-Regular.ttf";
 const FONT_SIZE: f32 = 13.0;
 const CHAR_RANGE: RangeInclusive<char> = '!'..='~'; // ASCII char range
-const BRIGHTNESS_SCALE: f32 = 0.93;
+
+const COVERAGE_SCALE: f32 = 0.7;
+const COVERAGE_GAMMA: f32 = 1.8;
 
 pub fn main() {
     // Build kernel console font
-    let font_data = fs::read("NotoSansMono-Regular.ttf").unwrap();
+    let font_data = fs::read(FONT_FILE).unwrap();
     let font = Font::from_bytes(font_data, FontSettings::default()).unwrap();
 
     let out_dir = env::var("OUT_DIR").unwrap();
@@ -51,9 +54,11 @@ pub fn main() {
                 let bitmap_y = y + baseline_y - metrics.height as i32 - metrics.ymin;
 
                 let idx = x + (y * metrics.width as i32);
-                let coverage = (data[idx as usize] as f32 * BRIGHTNESS_SCALE) as u8;
+                let coverage = data[idx as usize] as f32 / 255.0;
+                let coverage = coverage * COVERAGE_SCALE;
+                let coverage = coverage.powf(1.0 / COVERAGE_GAMMA);
 
-                bitmap[bitmap_y as usize][bitmap_x as usize] = coverage;
+                bitmap[bitmap_y as usize][bitmap_x as usize] = (coverage * 255.0) as u8;
             }
         }
 
